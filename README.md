@@ -61,27 +61,6 @@ Hold **Shift** while talking to an NPC to pause all of these.
 - **Party quest progress.** See how far your group has got on quests you share ("Bob 3/7, Amy done"). Only party
   members who also run AuDHD show up.
 
-## Routes
-
-Each route is planned ahead of time from quest, NPC and map data. The plan orders quests so you walk as little as
-possible, picks up kill and collect objectives on the way to somewhere you were already going, and skips quests that
-cost more time than they give back.
-
-| Start | Route | Levels |
-| --- | --- | --- |
-| Northshire | Any class | 1 to 16 |
-| Northshire | Hunter (pet at 10) | 1 to 16 |
-| Northshire | Warlock (voidwalker at 10) | 1 to 16 |
-| Coldridge Valley | Any class | 1 to 16 |
-| Coldridge Valley | Hunter (pet at 10) | 1 to 16 |
-| Coldridge Valley | Shaman (totem quests) | 1 to 16 |
-| Coldridge Valley | Gnome Warlock (voidwalker at 10) | 1 to 16 |
-| Teldrassil | Night Elf Hunter | 1 to 16 |
-| Darkshore, Eastern Kingdoms or a mix | Hunter | 14 to 20 |
-
-Pick one with `/audhd routes` or the **Pick a route** button in the settings. The addon suggests the route that fits
-your race, class and level.
-
 ## The route window
 
 - **One step at a time.** "Take this quest", "kill 8 of these", "hand that in". Progress counts update as you play.
