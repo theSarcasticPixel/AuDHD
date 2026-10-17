@@ -50,7 +50,7 @@ local function onMap(step, mapID)
 end
 
 local function newPin(parent, size)
-  local f = CreateFrame("Frame", nil, parent)
+  local f = ns.newFrame("RouteMap", "Frame", nil, parent)
   f:SetSize(size, size)
   f.dot = f:CreateTexture(nil, "ARTWORK")
   f.dot:SetAllPoints()
@@ -146,7 +146,7 @@ function R.drawWorld()
   local w, h = cv:GetWidth(), cv:GetHeight()
   if not w or w <= 0 then return end
   local scale = cv:GetScale() or 1
-  if not lineFrame then lineFrame = CreateFrame("Frame", nil, cv); ours[lineFrame] = true end
+  if not lineFrame then lineFrame = ns.newFrame("RouteMap", "Frame", nil, cv); ours[lineFrame] = true end
   local base = above(cv)
   lineFrame:SetParent(cv)
   lineFrame:SetAllPoints(cv)
@@ -257,7 +257,7 @@ function R.drawSpawnsWorld()
   local w, h = cv:GetWidth(), cv:GetHeight()
   if not w or w <= 0 then return end
   local scale = cv:GetScale() or 1
-  if not spawnFrame then spawnFrame = CreateFrame("Frame", nil, cv); ours[spawnFrame] = true end
+  if not spawnFrame then spawnFrame = ns.newFrame("RouteMap", "Frame", nil, cv); ours[spawnFrame] = true end
   spawnFrame:SetParent(cv)
   spawnFrame:SetAllPoints(cv)
   spawnFrame:SetFrameLevel(above(cv) + 25)
@@ -324,7 +324,7 @@ function R.drawRaresWorld()
             n = n + 1
             local pin = rarePins[n]
             if not pin then
-              pin = CreateFrame("Frame", nil, cv)
+              pin = ns.newFrame("RouteMap", "Frame", nil, cv)
               pin.tex = pin:CreateTexture(nil, "ARTWORK")
               pin.tex:SetAllPoints()
               pin.tex:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcon_8")
@@ -477,7 +477,7 @@ function R.drawSpawnsMinimap()
   local facing = GetPlayerFacing and GetPlayerFacing()
   if facing and isSecret(facing) then facing = nil end
   local rotates = GetCVar("rotateMinimap") == "1"
-  if not miniSpawnFrame then miniSpawnFrame = CreateFrame("Frame", nil, Minimap); miniSpawnFrame:SetAllPoints(Minimap) end
+  if not miniSpawnFrame then miniSpawnFrame = ns.newFrame("RouteMap", "Frame", nil, Minimap); miniSpawnFrame:SetAllPoints(Minimap) end
   miniSpawnFrame:SetFrameLevel(Minimap:GetFrameLevel() + 3)
   local k = radiusPx / radiusYards
   for mi, mm in ipairs(mem) do

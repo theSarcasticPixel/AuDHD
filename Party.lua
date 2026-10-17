@@ -113,7 +113,7 @@ end
 function P.enable()
   if not (C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix) then return end
   C_ChatInfo.RegisterAddonMessagePrefix(PREFIX)
-  local f = CreateFrame("Frame")
+  local f = ns.newFrame("Party", "Frame")
   for _, e in ipairs({ "CHAT_MSG_ADDON", "GROUP_ROSTER_UPDATE", "QUEST_LOG_UPDATE", "QUEST_REMOVED", "PLAYER_ENTERING_WORLD" }) do
     pcall(f.RegisterEvent, f, e)
   end

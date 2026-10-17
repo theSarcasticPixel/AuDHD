@@ -65,7 +65,7 @@ local function label(unit)
   local plate = plateFor(unit)
   if not plate then if l then l:Hide() end return nil end
   if not l then
-    l = CreateFrame("Frame", nil, UIParent)
+    l = ns.newFrame("Threat", "Frame", nil, UIParent)
     l:SetSize(40, 14)
     l.text = l:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     l.text:SetPoint("CENTER")
@@ -98,7 +98,7 @@ function T.update()
 end
 
 function T.enable()
-  local f = CreateFrame("Frame")
+  local f = ns.newFrame("Threat", "Frame")
   for _, e in ipairs({ "NAME_PLATE_UNIT_ADDED", "NAME_PLATE_UNIT_REMOVED", "UNIT_THREAT_LIST_UPDATE", "UNIT_THREAT_SITUATION_UPDATE", "PLAYER_REGEN_ENABLED" }) do
     pcall(f.RegisterEvent, f, e)
   end

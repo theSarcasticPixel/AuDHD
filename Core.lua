@@ -224,6 +224,7 @@ function C.isDone(step, i)
     return objectiveDone(step)
   end
   if (step.k == "buyweapon" or step.k == "craft") and step.wp and hasItem(step.wp) then return true end
+  if step.k == "discover" and step.taxi and ns.walk and ns.walk.knownTaxis()[step.taxi] then return true end
   return false   -- train, bind, discover, buy, craft, run, grind: done by an event below or by you (Done)
 end
 
@@ -634,6 +635,8 @@ end
 -- caves: the map is flat, so a spot above a cave looks the same as one in it (box: x1, x2, y1, y2 on the zone's map)
 local CAVES = {
   ["Grizzled Den"] = { m = 1426, door = { 42, 54 }, box = { 39.5, 44.5, 44.5, 56.5 } },
+  -- the Fire Tar for Call of Fire, the user 2026-10-17: "the entrance to the cave for the Fire Tar is 35.5,18.8"
+  ["Silver Stream Mine"] = { m = 1432, door = { 35.5, 18.8 }, box = { 33.5, 38.5, 19.3, 29 } },
 }
 local function caveAt(m, x, y)
   for name, cv in pairs(CAVES) do
@@ -767,7 +770,7 @@ local function roamable(step)
 end
 -- once a second: mark the spawn points you're at as seen, and move the arrow on when its point is
 function C.roamTick()
-  if not roam.step or C.goalTarget ~= roam.goal then return end
+  if not roam.step or C.goalTarget ~= roam.goal or C.onTaxi() then return end
   local pw = playerWorld()
   if not pw then return end
   if roam.via then roam.nextW = C.routeAim or roam.nextW end
@@ -1008,6 +1011,50 @@ function C.later()
   C.advance("later")
 end
 
+-- on a flight path: where you are says nothing about what's on your way (the user, 2026-10-17: "while you're
+-- mid-flight it should not be updating the quest route as though you're walking")
+local function onTaxi() return UnitOnTaxi and UnitOnTaxi("player") and true or false end
+C.onTaxi = onTaxi
+-- yards: a flight master this near you, or this little out of the way to the route's step
+local FP_NEAR, FP_DETOUR = 600, 400
+C.fpSteps = {}
+-- only flight masters with a flight from them (the data has some with none, like Teldrassil's "Fishing Village": not
+-- in the game), and not a class's own (Nighthaven: druids)
+local FP_CLASS = { [62] = "DRUID" }
+local fpReal = {}
+local function realFlights(c, d)
+  if not fpReal[c] then
+    fpReal[c] = {}
+    for a in (d.flights or ""):gmatch("(%d+)>%d+>%d+") do fpReal[c][tonumber(a)] = true end
+  end
+  return fpReal[c]
+end
+function C.flightToLearn(P, R)
+  if not (ns.walk and ns.walk.knownTaxis and ns.walkData) then return nil end
+  local d = ns.walkData[P.c]
+  if not (d and d.taxis) then return nil end
+  local K, st = ns.walk.knownTaxis(), rdb()
+  local real = realFlights(P.c, d)
+  local _, class = UnitClass("player")
+  local rw = R and placeFor(R, P)
+  rw = rw and rw.c == P.c and rw or nil
+  local best, bd
+  for _, t in ipairs(d.taxis) do
+    local id = "f" .. t.id
+    if not K[t.id] and not st.manual[id] and real[t.id] and (not FP_CLASS[t.id] or FP_CLASS[t.id] == class) then
+      C.fpSteps[t.id] = C.fpSteps[t.id] or { k = "discover", taxi = t.id, m = t.m, x = t.x, y = t.y,
+                                             t = ("Learn the flight path at %s (talk to the flight master)"):format(t.n) }
+      local s = C.fpSteps[t.id]
+      local w = spot(s)
+      if w and w.c == P.c then
+        local dd = dist(P, w)
+        local onWay = rw and dd < dist(P, rw) and dd + dist(w, rw) - dist(P, rw) <= FP_DETOUR
+        if (dd <= FP_NEAR or onWay) and (not bd or dd < bd) then best, bd = { step = s, i = id, via = true }, dd end
+      end
+    end
+  end
+  return best
+end
 local function pick()
   local st, o, steps = rdb(), order(), C.route().steps
   -- an escort under way: that's all you can do (follow them; no detours)
@@ -1030,7 +1077,7 @@ local function pick()
   -- 2026-10-17: sent 3200 yd back to Kharanos for Camping 101's hand-in, route step 2, with steps 3-30 done, "that is
   -- fucking insane"). The last steps of the route, nothing after them: it's their turn
   local LEFT_DONE, LEFT_FAR = 3, 500
-  local Pnow = GetTime() >= holdUntil and playerWorld()
+  local Pnow = GetTime() >= holdUntil and not onTaxi() and playerWorld()
   -- each step's done-ness asked once per pick (not 40 times over: lag, the user 2026-10-17)
   local doneAt = {}
   local function isDoneAt(q)
@@ -1064,7 +1111,7 @@ local function pick()
   local R, Ri = steps[o[rp]], o[rp]
   C.routeStep = Ri   -- the route's own step under any GPS pick (tests, /wfn why)
   if not R then return nil end
-  local P = GetTime() >= holdUntil and playerWorld()
+  local P = GetTime() >= holdUntil and not onTaxi() and playerWorld()
   -- steps put aside for later: armed once you've been LATER_AWAY from them
   for _, lt in pairs(st.later or {}) do
     if P and not lt.away and (not lt.x or lt.c ~= P.c or dist(P, lt) > LATER_AWAY) then lt.away = true end
@@ -1079,6 +1126,10 @@ local function pick()
     return { step = best, i = waitId(best), via = "escort" }
   end
   if not P then return { step = R, i = Ri } end
+  -- a flight master you haven't learned, near you or on your way: always there first (the user, 2026-10-17: "when going
+  -- near a flight path you dont have it should always direct you there", sent on to Westfall past Stormwind's)
+  local fp = C.flightToLearn(P, R)
+  if fp then return fp end
   -- working a kill / collect step (among its spawns): stay on it until it's done, instead of flipping to another one
   -- nearby (the user, 2026-10-17: Stocking Jetsteam's two steps by turns, "jumping back and forth between two spots")
   local cs = C.cur and C.cur.step
@@ -1216,9 +1267,128 @@ function C.repick(force, reason)
     log("STEP_DONE", { n = old.i, k = old.step.k, q = old.step.q, reason = reason, via = true, secs = math.floor(GetTime() - stepStarted) })
     stepStarted = GetTime()
   end
+  -- flying: the arrow stays on what it showed at take-off until that's done
+  if onTaxi() and old and old.step and not C.isDone(old.step, old.i) and not force then return end
   local new = pick()
   C.cur = new
   if force or (old and old.i) ~= (new and new.i) then C.onStepChanged() end
+end
+
+-- ------------------------------------------------------------------ a quest you took that the route doesn't plan
+-- auto-accept takes plenty of quests the route doesn't need: each one asks once whether to do it, with what it adds
+-- (the user, 2026-10-17: "showing how much extra time it will add and for how much exp, showing xp/hr with it vs
+-- without it"). Until you say "Do it", the GPS doesn't send you to its work.
+local RUN = 7   -- yards a second, on foot
+local offQueue, offShowing = {}, false
+local function thousands(n)
+  local s = tostring(math.floor(n + 0.5))
+  return (s:reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", ""))
+end
+local function onRouteQ(q)
+  for _, s in ipairs(C.route().steps) do
+    if s.q == q then return true end
+    for _, m in ipairs(s.mem or {}) do if m.q == q then return true end end
+  end
+  return false
+end
+-- seconds it adds: its work, plus the walk there, round its objectives, to its hand-in and back to the route's step
+function C.offRouteCost(q)
+  local r = C.route()
+  local e, o = (r.ends or {})[q], (r.objs or {})[q]
+  local P = playerWorld()
+  if not P then return nil end
+  local here, walk, far = P, 0, false
+  for _, m in ipairs(o and o.mem or {}) do
+    if not objectiveDone(m) then
+      local best, bd
+      for _, w in ipairs(spawnSpots(m)) do
+        if w.c == here.c and (not bd or dist(here, w) < bd) then best, bd = w, dist(here, w) end
+      end
+      if best then walk, here = walk + bd, best elseif #spawnSpots(m) > 0 then far = true end
+    end
+  end
+  local ew = e and spot(e)
+  if ew then
+    if ew.c == here.c then walk, here = walk + dist(here, ew), ew else far = true end
+  end
+  local R = C.routeStep and r.steps[C.routeStep]
+  local rw = R and spot(R)
+  if rw and rw.c == here.c and rw.c == P.c then walk = walk + dist(here, rw) - dist(P, rw) end
+  return math.max(0, walk) / RUN + (e and e.ws or 0), e and e.xp, far
+end
+local function offShowNext()
+  if offShowing and StaticPopup_Visible and StaticPopup_Visible("AUDHD_OFFROUTE") then return end
+  local q = table.remove(offQueue, 1)
+  if not q then return end
+  local r = C.route()
+  local name = ((r.ends or {})[q] or (r.objs or {})[q] or {}).t or (C_QuestLog.GetTitleForQuestID and C_QuestLog.GetTitleForQuestID(q)) or ("quest " .. q)
+  local secs, xp, far = C.offRouteCost(q)
+  local lines = { ("You took |cffffd200%s|r. It isn't on your route."):format(name) }
+  if far then
+    lines[#lines + 1] = "Part of it is on another continent: a long trip."
+  elseif secs then
+    lines[#lines + 1] = ("About |cffffffff+%d min|r for |cffffffff%s XP|r."):format(math.max(1, math.floor(secs / 60 + 0.5)), xp and thousands(xp) or "? ")
+    local o, st = order(), rdb()
+    if r.xph and r.minutes and xp and #o > 0 then
+      local left = r.minutes * 60 * math.max(1, #o - st.pos + 1) / #o
+      local with = (r.xph * left / 3600 + xp) / (left + secs) * 3600
+      lines[#lines + 1] = ("XP/h: |cffffffff%s|r without it, |cff%s%s|r with it."):format(thousands(r.xph), with >= r.xph and "40ff40" or "ff6060", thousands(with))
+    end
+  else
+    lines[#lines + 1] = "AuDHD can't tell how long it takes."
+  end
+  lines[#lines + 1] = "Do it?"
+  offShowing = true
+  local dlg = StaticPopup_Show("AUDHD_OFFROUTE", table.concat(lines, "\n"))
+  if dlg then dlg.data = { q = q } else offShowing = false end
+  log("OFFROUTE_ASK", { q = q, secs = secs and math.floor(secs), xp = xp, far = far or nil })
+end
+StaticPopupDialogs["AUDHD_OFFROUTE"] = {
+  text = "%s",
+  button1 = "Do it",
+  button2 = "Skip & abandon",
+  OnAccept = function(_, data) C.offRouteChoice(data, true) end,
+  OnCancel = function(_, data, reason) if reason == "clicked" then C.offRouteChoice(data, false) end end,
+  OnHide = function() offShowing = false; C_Timer.After(0.2, offShowNext) end,
+  timeout = 0, whileDead = true, hideOnEscape = false, preferredIndex = 3,
+}
+-- abandon a quest in your log: true when the game took it
+function C.abandon(q)
+  if C_QuestLog.SetSelectedQuest and C_QuestLog.SetAbandonQuest and C_QuestLog.AbandonQuest then
+    if not C_QuestLog.GetLogIndexForQuestID(q) then return false end
+    C_QuestLog.SetSelectedQuest(q)
+    C_QuestLog.SetAbandonQuest()
+    C_QuestLog.AbandonQuest()
+    return true
+  end
+  local idx = C_QuestLog.GetLogIndexForQuestID and C_QuestLog.GetLogIndexForQuestID(q)
+  if idx and SelectQuestLogEntry and SetAbandonQuest and AbandonQuest then
+    SelectQuestLogEntry(idx)
+    SetAbandonQuest()
+    AbandonQuest()
+    return true
+  end
+  return false
+end
+function C.offRouteChoice(data, doIt)
+  if not data then return end
+  local st = rdb()
+  st.offAsked = st.offAsked or {}
+  st.offAsked[data.q] = doIt and "do" or "skip"
+  st.manual["o" .. data.q] = not doIt or nil   -- skipped: the GPS doesn't send you to its work
+  -- and out of your log (the user, 2026-10-17: "when you click 'skip it' ... it should also abandon the quest")
+  local abandoned = not doIt and C.abandon(data.q)
+  log("OFFROUTE_CHOICE", { q = data.q, doIt = doIt, abandoned = abandoned or nil })
+  C.repick(true, "off-route choice")
+end
+function C.offRouteAsk(q)
+  q = tonumber(q)
+  if not q or q <= 0 or not C.route() then return end
+  local st = rdb()
+  if (st.offAsked or {})[q] or onRouteQ(q) or (C.route().picks or {})[q] then return end   -- a pick-up the GPS offered: you chose it
+  st.manual["o" .. q] = true   -- not offered until you answer
+  offQueue[#offQueue + 1] = q
+  C_Timer.After(0.5, offShowNext)   -- after auto-accept has closed the quest window
 end
 
 -- ------------------------------------------------------------------ the stretch pop-up
@@ -1294,7 +1464,7 @@ function C.plannedReward(questID)
 end
 
 -- ------------------------------------------------------------------ events that finish steps
-local frame = CreateFrame("Frame")
+local frame = ns.newFrame("Core", "Frame")
 local pending = false
 local function soon(reason)
   if pending then return end
@@ -1320,7 +1490,8 @@ function moneyCheck()
 end
 
 local events = {
-  QUEST_ACCEPTED = function() soon("quest accepted") end,
+  QUEST_ACCEPTED = function(a, b) soon("quest accepted"); C.offRouteAsk(b or a) end,
+  PLAYER_CONTROL_GAINED = function() soon("landed") end,   -- off the flight path: look again where you are
   QUEST_TURNED_IN = function(q) turnedIn[q] = true; soon("quest turned in") end,
   QUEST_REMOVED = function() soon("quest removed") end,
   QUEST_LOG_UPDATE = function()
@@ -1541,6 +1712,8 @@ SlashCmdList.AUDHD = function(input)
     say(ns.buffAsk.command(rest))
   elseif cmd == "imbue" and ns.imbue then
     say(ns.imbue.command(rest))
+  elseif cmd == "shards" and ns.shards then
+    say(ns.shards.command(rest))
   elseif (cmd == "buffs" or cmd == "aspect") and ns.imbue then
     say(ns.imbue.command(rest, "buffs"))
   elseif cmd == "blocked" and ns.walk then
@@ -1562,6 +1735,6 @@ SlashCmdList.AUDHD = function(input)
     C.advance("route")
     say("route reset to step 1 (steps you've done are skipped again)")
   else
-    say("/wfn (show/hide), /wfn note <text>, /wfn done, /wfn later, /wfn back, /wfn goto <n>, /wfn route [name], /wfn routes, /wfn settings, /wfn minimap on|off, /wfn auto, /wfn ammo [off|<count>], /wfn arrow, /wfn map on|off, /wfn threat on|off, /wfn rares all|route|off, /wfn perf, /wfn spec [name], /wfn imbue [off|on], /wfn buffs [off|on], /wfn announce [off|on], /wfn askbuffs [off|on], /wfn blocked, /wfn unblock, /wfn log, /wfn reset")
+    say("/wfn (show/hide), /wfn note <text>, /wfn done, /wfn later, /wfn back, /wfn goto <n>, /wfn route [name], /wfn routes, /wfn settings, /wfn minimap on|off, /wfn auto, /wfn ammo [off|<count>], /wfn arrow, /wfn map on|off, /wfn threat on|off, /wfn rares all|route|off, /wfn perf, /wfn spec [name], /wfn imbue [off|on], /wfn shards [off|on|max <n>|low <n>], /wfn buffs [off|on], /wfn announce [off|on], /wfn askbuffs [off|on], /wfn blocked, /wfn unblock, /wfn log, /wfn reset")
   end
 end

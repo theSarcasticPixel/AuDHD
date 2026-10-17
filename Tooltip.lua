@@ -129,7 +129,7 @@ function D.loot()
 end
 
 function D.enable()
-  local f = CreateFrame("Frame")
+  local f = ns.newFrame("Tooltip", "Frame")
   for _, e in ipairs({ "LOOT_OPENED", "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT", "NAME_PLATE_UNIT_REMOVED", "UNIT_HEALTH" }) do
     pcall(f.RegisterEvent, f, e)
   end

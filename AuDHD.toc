@@ -2,7 +2,7 @@
 ## Title: AuDHD
 ## Notes: Planned leveling route (GPS-style) with a research logger. /audhd (or /wfn) for commands.
 ## Author: theSarcasticPixel
-## Version: 0.1.0
+## Version: 0.2.0
 ## SavedVariables: AuDHDDB, AuDHDLog
 
 Route_nelf_hunter_start.lua
@@ -45,5 +45,6 @@ Services.lua
 Imbue.lua
 BuffAsk.lua
 UseItem.lua
+Shards.lua
 Tooltip.lua
 Perf.lua

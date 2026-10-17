@@ -306,7 +306,7 @@ end
 function R.create()
   if frame then return end
   local s = settings()
-  frame = CreateFrame("Frame", "AuDHDRange", UIParent)
+  frame = ns.newFrame("Range", "Frame", "AuDHDRange", UIParent)
   frame:SetSize(160, 58)
   frame:SetScale(s.scale or 1)
   frame:SetClampedToScreen(true)
@@ -329,7 +329,7 @@ function R.create()
 
   readTalents()
   local elapsed = 0
-  local ticker = CreateFrame("Frame")
+  local ticker = ns.newFrame("Range", "Frame")
   ticker:SetScript("OnUpdate", function(_, dt)
     elapsed = elapsed + dt
     if elapsed < 0.1 then return end

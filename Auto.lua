@@ -224,7 +224,7 @@ local function tooltipLines(link)
   end
   if not CreateFrame then return out end
   if not scanTip then
-    scanTip = CreateFrame("GameTooltip", "AuDHDScanTip", nil, "GameTooltipTemplate")
+    scanTip = ns.newFrame("Auto", "GameTooltip", "AuDHDScanTip", nil, "GameTooltipTemplate")
     scanTip:SetOwner(WorldFrame or UIParent, "ANCHOR_NONE")
   end
   scanTip:ClearLines()
@@ -458,7 +458,7 @@ function handlers.MERCHANT_SHOW()
   if on("junk") then C_Timer.After(0.3, function() if merchantOpen then local ok, err = pcall(sellJunk); if not ok then log("JUNK_ERROR", { err = tostring(err) }) end end end) end
 end
 
-local frame = CreateFrame("Frame")
+local frame = ns.newFrame("Auto", "Frame")
 frame:SetScript("OnEvent", function(_, event, ...)
   local h = handlers[event]
   if not h then return end

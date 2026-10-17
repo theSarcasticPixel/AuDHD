@@ -90,6 +90,12 @@ local function count(id)
   end
   return n
 end
+-- uses left: a Wizard Oil flask has 5 charges, so 2 flasks is 10 (the user, 2026-10-17: "it shows 2 left but each
+-- one has 5 charges"); the flask count when the client won't say
+local function uses(id)
+  local n = (C_Item and C_Item.GetItemCount and C_Item.GetItemCount(id, false, true)) or (GetItemCount and GetItemCount(id, false, true))
+  return n or count(id)
+end
 local function itemName(id)
   local n = C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(id)
   if not n and C_Item and C_Item.GetItemInfo then n = C_Item.GetItemInfo(id) end
@@ -176,7 +182,7 @@ local function weaponSeen()
   end
   seen = st
   -- for the log, as it changes: what the tooltip said is on the weapon
-  local key = table.concat(st.found, " | ")
+  local key = table.concat(st.found, " | "):gsub("%s*%([%d%.]+ %a+%)", "")   -- not the time left: it changes every second
   if key ~= seenLog then seenLog = key log("WEAPON_SEEN", { lines = key }) end
   return st
 end
@@ -194,10 +200,27 @@ function K.weapon.on()
   if st then return st.imbue end
   return has
 end
+-- every imbue you know is a button of its own, the one you cast last first; all go once one is on the weapon (the user,
+-- 2026-10-17: "i now have rockbiter and flametongue, it only offers flametongue button though, it should show both
+-- choices, disappearing once one is on your weapon")
+local IMBUE_ORDER = { "Rockbiter Weapon", "Flametongue Weapon", "Frostbrand Weapon", "Windfury Weapon" }
+local function knownImbues()
+  local d, out = db(), {}
+  if d.spell and known(IMBUES, d.spell) then out[1] = d.spell end
+  for _, name in ipairs(IMBUE_ORDER) do if name ~= d.spell and known(IMBUES, name) then out[#out + 1] = name end end
+  return out
+end
 function K.weapon.source()
-  local d = db()
-  if d.spell and known(IMBUES, d.spell) then return { spell = d.spell } end
-  if known(IMBUES, "Rockbiter Weapon") then return { spell = "Rockbiter Weapon" } end
+  local name = knownImbues()[1]
+  return name and { spell = name } or nil
+end
+for n = 2, #IMBUE_ORDER do
+  K["weapon" .. n] = {
+    when = "off",
+    on = function() if not knownImbues()[n] then return nil end return K.weapon.on() end,
+    source = function() local name = knownImbues()[n] return name and { spell = name } or nil end,
+    mine = function() return K.weapon.mine() end,
+  }
 end
 K.oil = { when = "off" }
 function K.oil.on()
@@ -312,13 +335,14 @@ for gi, g in ipairs(GROUPS) do
 end
 local KINDS = {}   -- in order: weapon, then the self buffs (the buttons stack down)
 KINDS[1] = "weapon"
-KINDS[2] = "oil"
+for n = 2, #IMBUE_ORDER do KINDS[#KINDS + 1] = "weapon" .. n end
+KINDS[#KINDS + 1] = "oil"
 for _, g in ipairs(GROUPS) do KINDS[#KINDS + 1] = "buff_" .. g.class .. "_" .. g.key end
 
 -- ------------------------------------------------------------------ the buttons
 local function makeButton(kind)
   local k = K[kind]
-  local b = CreateFrame("Button", "AuDHD_" .. kind .. "Button", UIParent, "SecureActionButtonTemplate,BackdropTemplate")
+  local b = ns.newFrame("Imbue", "Button", "AuDHD_" .. kind .. "Button", UIParent, "SecureActionButtonTemplate,BackdropTemplate")
   b:SetSize(380, 34)
   if b.SetBackdrop then
     b:SetBackdrop({ bgFile = "Interface\\Tooltips\\UI-Tooltip-Background", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -354,7 +378,7 @@ local function makeButton(kind)
   hl:SetPoint("TOPLEFT", 3, -3)
   hl:SetPoint("BOTTOMRIGHT", -3, 3)
   hl:SetColorTexture(0.4, 0.7, 1, 0.18)
-  local close = CreateFrame("Button", nil, b, "UIPanelCloseButton")
+  local close = ns.newFrame("Imbue", "Button", nil, b, "UIPanelCloseButton")
   close:SetSize(22, 22)
   close:SetPoint("RIGHT", -2, 0)
   close:SetScript("OnClick", function() k.closed = true I.hide(kind) end)
@@ -396,7 +420,7 @@ function I.show(kind, src)
   else
     b:SetAttribute("type", "macro")
     b:SetAttribute("macrotext", ("/use item:%d\n/use 16"):format(src.item))
-    b.msg = ("No oil or stone on your weapon: click to put on %s (%d left)"):format(itemName(src.item), count(src.item))
+    b.msg = ("No oil or stone on your weapon: click to put on %s (%d left)"):format(itemName(src.item), uses(src.item))
     b.icon:SetTexture(itemIcon(src.item))
   end
   b.text:SetText(b.msg)
@@ -471,7 +495,7 @@ function I.command(arg, which)
   return which == "buffs" and "your buffs are all on (or you have none to keep up)" or "no weapon buff to put on (on already, or no imbue known and no oil or stone in your bags)"
 end
 
-local frame = CreateFrame("Frame")
+local frame = ns.newFrame("Imbue", "Frame")
 frame:RegisterEvent("PLAYER_LOGIN")
 frame:RegisterEvent("PLAYER_REGEN_ENABLED")
 frame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")

@@ -26,7 +26,7 @@ end
 function A.create()
   if frame then return end
   local s = settings()
-  frame = CreateFrame("Frame", "AuDHDArrow", UIParent)
+  frame = ns.newFrame("Arrow", "Frame", "AuDHDArrow", UIParent)
   frame:SetSize(SIZE, SIZE + 70)
   frame:SetScale(s.scale or 1)
   frame:SetClampedToScreen(true)
@@ -65,7 +65,7 @@ function A.create()
 
   -- X while the arrow is sent somewhere off the route (an ammo vendor): back to the route (the user, 2026-10-17: "the
   -- ability to x/close the vendor arrows for when you decide to keep going instead of going to the vendor")
-  closeBtn = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
+  closeBtn = ns.newFrame("Arrow", "Button", nil, frame, "UIPanelCloseButton")
   closeBtn:SetSize(22, 22)
   closeBtn:SetPoint("TOPRIGHT", tex, "TOPRIGHT", 14, 4)
   closeBtn:SetScript("OnClick", function()

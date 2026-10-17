@@ -57,7 +57,7 @@ end
 local function name(r) return ((r.title or "?"):gsub(":%s*level %d+ to %d+$", "")) end
 
 local function create()
-  frame = CreateFrame("Frame", "AuDHDRoutePicker", UIParent, "BackdropTemplate")
+  frame = ns.newFrame("RoutePicker", "Frame", "AuDHDRoutePicker", UIParent, "BackdropTemplate")
   frame:SetSize(WIDTH, 120)
   frame:SetBackdrop({ bgFile = "Interface\\Tooltips\\UI-Tooltip-Background", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
                       tile = true, tileSize = 16, edgeSize = 12, insets = { left = 3, right = 3, top = 3, bottom = 3 } })
@@ -77,7 +77,7 @@ local function create()
   frame.sub:SetPoint("TOPLEFT", frame.title, "BOTTOMLEFT", 0, -3)
   frame.sub:SetPoint("RIGHT", -12, 0)
   frame.sub:SetJustifyH("LEFT")
-  local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
+  local close = ns.newFrame("RoutePicker", "Button", nil, frame, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", -2, -2)
   close:SetScript("OnClick", function() frame:Hide() end)
   frame:Hide()
@@ -86,7 +86,7 @@ end
 local function row(i)
   local b = rows[i]
   if b then return b end
-  b = CreateFrame("Button", nil, frame, "BackdropTemplate")
+  b = ns.newFrame("RoutePicker", "Button", nil, frame, "BackdropTemplate")
   b:SetSize(WIDTH - 20, ROW_H - 4)
   b:SetBackdrop({ bgFile = "Interface\\Tooltips\\UI-Tooltip-Background", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
                   tile = true, tileSize = 16, edgeSize = 10, insets = { left = 2, right = 2, top = 2, bottom = 2 } })

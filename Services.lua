@@ -80,7 +80,7 @@ local pops = {}      -- kind -> its pop-up frame
 local SLOT = { vendor = 0, trainer = 1 }
 local function popup(kind)
   if pops[kind] then return pops[kind] end
-  local f = CreateFrame("Frame", "AuDHDService_" .. kind, UIParent, "BackdropTemplate")
+  local f = ns.newFrame("Services", "Frame", "AuDHDService_" .. kind, UIParent, "BackdropTemplate")
   f:SetSize(300, 64)
   f:SetPoint("TOP", UIParent, "TOP", 0, -230 - 70 * (SLOT[kind] or 0))
   f:SetFrameStrata("HIGH")
@@ -99,7 +99,7 @@ local function popup(kind)
   f.text:SetPoint("TOP", 0, -10)
   f.text:SetWidth(284)
   local function button(label, x, onClick)
-    local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    local b = ns.newFrame("Services", "Button", nil, f, "UIPanelButtonTemplate")
     b:SetSize(90, 20)
     b:SetPoint("BOTTOM", f, "BOTTOM", x, 8)
     b:SetText(label)
@@ -184,7 +184,7 @@ function M.check()
   end
 end
 
-local frame = CreateFrame("Frame")
+local frame = ns.newFrame("Services", "Frame")
 frame:RegisterEvent("PLAYER_LOGIN")
 frame:SetScript("OnEvent", function()
   C_Timer.NewTicker(2, function() pcall(M.check) end)

@@ -9,7 +9,7 @@ local KIND = { accept = "Accept", ["do"] = "Do", turnin = "Turn in", train = "Tr
 local frame, title, stepText, distText, nextText
 
 local function button(parent, label, width, onClick)
-  local b = CreateFrame("Button", nil, parent, "UIPanelButtonTemplate")
+  local b = ns.newFrame("UI", "Button", nil, parent, "UIPanelButtonTemplate")
   b:SetSize(width, 20)
   b:SetText(label)
   b:SetScript("OnClick", onClick)
@@ -18,7 +18,7 @@ end
 
 function U.create()
   if frame then return end
-  frame = CreateFrame("Frame", "AuDHDFrame", UIParent, "BackdropTemplate")
+  frame = ns.newFrame("UI", "Frame", "AuDHDFrame", UIParent, "BackdropTemplate")
   frame:SetSize(360, 168)
   frame:SetBackdrop({ bgFile = "Interface\\Tooltips\\UI-Tooltip-Background", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
                       tile = true, tileSize = 16, edgeSize = 12, insets = { left = 3, right = 3, top = 3, bottom = 3 } })

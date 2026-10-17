@@ -62,7 +62,7 @@ function Q.command(arg)
   return "quest complete messages are " .. (off() and "off" or "on") .. " (/wfn announce off|on)"
 end
 
-local frame = CreateFrame("Frame")
+local frame = ns.newFrame("QuestDone", "Frame")
 frame:RegisterEvent("PLAYER_LOGIN")
 frame:RegisterEvent("QUEST_LOG_UPDATE")
 frame:SetScript("OnEvent", function(_, event)

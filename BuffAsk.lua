@@ -171,7 +171,7 @@ local function spellIcon(id)
   return t or 134400
 end
 local function makeBar()
-  bar = CreateFrame("Frame", "AuDHDBuffAsk", UIParent, "BackdropTemplate")
+  bar = ns.newFrame("BuffAsk", "Frame", "AuDHDBuffAsk", UIParent, "BackdropTemplate")
   bar:SetSize(120, 54)
   if bar.SetBackdrop then
     bar:SetBackdrop({ bgFile = "Interface\\Tooltips\\UI-Tooltip-Background", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -197,7 +197,7 @@ local function makeBar()
 end
 local function button(i)
   if buttons[i] then return buttons[i] end
-  local b = CreateFrame("Button", nil, bar)
+  local b = ns.newFrame("BuffAsk", "Button", nil, bar)
   b:SetSize(28, 28)
   b:SetPoint("TOPLEFT", 8 + (i - 1) * 32, -20)
   b.icon = b:CreateTexture(nil, "ARTWORK")
@@ -253,7 +253,7 @@ function A.command(arg)
   return s ~= "" and ("you could ask for: " .. s) or "no buffs to ask the party for now"
 end
 
-local frame = CreateFrame("Frame")
+local frame = ns.newFrame("BuffAsk", "Frame")
 frame:RegisterEvent("PLAYER_LOGIN")
 frame:RegisterEvent("GROUP_ROSTER_UPDATE")
 frame:RegisterEvent("UNIT_AURA")

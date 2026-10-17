@@ -39,7 +39,7 @@ end
 
 function M.create()
   if button then return end
-  button = CreateFrame("Button", "AuDHDMinimapButton", Minimap)
+  button = ns.newFrame("MinimapButton", "Button", "AuDHDMinimapButton", Minimap)
   button:SetSize(31, 31)
   button:SetFrameStrata("MEDIUM")
   button:SetFrameLevel(8)

@@ -9,7 +9,7 @@ ns.useItem = M
 local button, wanted, pending
 
 local function make()
-  button = CreateFrame("Button", "AuDHDUseItem", UIParent, "SecureActionButtonTemplate,BackdropTemplate")
+  button = ns.newFrame("UseItem", "Button", "AuDHDUseItem", UIParent, "SecureActionButtonTemplate,BackdropTemplate")
   button:SetSize(40, 40)
   button:RegisterForClicks("AnyUp", "AnyDown")
   button:SetAttribute("type", "item")
@@ -63,7 +63,7 @@ function M.refresh()
   end
 end
 
-local frame = CreateFrame("Frame")
+local frame = ns.newFrame("UseItem", "Frame")
 frame:RegisterEvent("PLAYER_REGEN_ENABLED")
 frame:RegisterEvent("BAG_UPDATE_DELAYED")
 frame:RegisterEvent("PLAYER_LOGIN")

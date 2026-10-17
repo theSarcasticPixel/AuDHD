@@ -32,16 +32,18 @@ function W.mapCont(m) local t = ns.walkMaps and ns.walkMaps[m]; return t and t.c
 
 -- ------------------------------------------------------------------ the graph
 local graphs = {}
+local joinCities   -- below, with the cities
 local function graph(cont)
   if graphs[cont] ~= nil then return graphs[cont] or nil end
   local d = ns.walkData and ns.walkData[cont]
   if not d then graphs[cont] = false return nil end
-  local G = { X = {}, Y = {}, adj = {}, cost = {}, grid = {} }
+  local G = { X = {}, Y = {}, adj = {}, cost = {}, grid = {}, ledge = {} }
   local nodes, n = d.nodes, floor(#d.nodes / 7)
   for i = 1, n do
     local p = (i - 1) * 7 + 1
     local X, Y = n3(nodes, p) / 2 - 32768, n3(nodes, p + 3) / 2 - 32768
     G.X[i], G.Y[i], G.adj[i], G.cost[i] = X, Y, {}, {}
+    if hasBit(D[byte(nodes, p + 6)], 16) then G.ledge[i] = true end
     local k = cellKey(X, Y)
     local cell = G.grid[k]
     if not cell then cell = {}; G.grid[k] = cell end
@@ -72,6 +74,7 @@ local function graph(cont)
     end
   end
   G.n = n
+  joinCities(G, link)
   graphs[cont] = G
   W.applyBlocks(G, cont)
   return G
@@ -232,6 +235,27 @@ local function inCity(m, X, Y)
   local e = CITY_EDGE[m] or {}
   return x >= (e.x1 or 0) / 100 and x <= (e.x2 or 100) / 100 and y >= (e.y1 or 0) / 100 and y <= (e.y2 or 100) / 100
 end
+-- a city's nodes, all joined up: the city is walked straight (cityStraight), but its few nodes don't join up by
+-- themselves (the tram's end in Ironforge and in Stormwind joined to nothing: the user, 2026-10-17, "it should be taking
+-- me to the tram"). Nodes of the same city within JOIN yards get a straight edge, a little dearer than a real one
+local JOIN = 400
+joinCities = function(G, link)
+  local byCity = {}
+  for i = 1, #G.X do
+    for m in pairs(CITY) do
+      if inCity(m, G.X[i], G.Y[i]) then byCity[m] = byCity[m] or {}; table.insert(byCity[m], i) break end
+    end
+  end
+  for _, list in pairs(byCity) do
+    for a = 1, #list do
+      for b = a + 1, #list do
+        local i, j = list[a], list[b]
+        local d = sqrt((G.X[i] - G.X[j]) ^ 2 + (G.Y[i] - G.Y[j]) ^ 2)
+        if d <= JOIN then link(i, j, d * 1.2) link(j, i, d * 1.2) end
+      end
+    end
+  end
+end
 -- a path's corners in the city at either end: one straight line instead, from the start to the last corner in the city
 -- before the way leaves it (or a ride), and from the first corner in the city after the last ride to the goal
 local function cityStraight(pts, m1, m2)
@@ -277,6 +301,7 @@ local RACE_TAXIS = { NightElf = { 27, 26 }, Human = { 2 }, Dwarf = { 6 }, Gnome 
 function W.knownTaxis()
   AuDHDDB.taxi = AuDHDDB.taxi or {}
   local k = (UnitName("player") or "?") .. "-" .. (GetRealmName and GetRealmName() or "?")
+  if not AuDHDDB.taxiV2 then AuDHDDB.taxi, AuDHDDB.taxiV2 = {}, true end   -- open a flight map to learn yours again
   local K = AuDHDDB.taxi[k]
   if not K then
     K = {}
@@ -328,13 +353,33 @@ function W.path(m1, x1, y1, m2, x2, y2, noFly)
   local G = graph(c1)
   local res = false
   if G then
-    local s, ds = nearest(G, X1, Y1, 150)
-    local g, dg = nearest(G, X2, Y2, 200)
-    local starts, goals = around(G, X1, Y1, 60, 150), around(G, X2, Y2, 60, 200)
+    -- in a city the graph has few nodes (none in Ironforge's Tinker Town, so no way from Jemma Quikswitch to the tram:
+    -- the user, 2026-10-17, and its nodes there don't join up): start from any node within reach, the city is walked
+    -- straight to it anyway (cityStraight)
+    local r1, r2 = CITY[m1] and 600 or 150, CITY[m2] and 600 or 200
+    local s, ds = nearest(G, X1, Y1, r1)
+    local g, dg = nearest(G, X2, Y2, r2)
+    local starts, goals = around(G, X1, Y1, 60, r1), around(G, X2, Y2, 60, r2)
+    -- a ledge a player told us the way up to (the top of a walkWays way): near it, that way only, never the other
+    -- nodes round it at the foot of the cliff (Braldir Ashmantle, the user 2026-10-17)
+    local ledge = false
+    local function ledgeOnly(set)
+      local only
+      for i, d in pairs(set or {}) do if G.ledge[i] then only = only or {} only[i] = d ledge = true end end
+      return only or set
+    end
+    starts, goals = ledgeOnly(starts), ledgeOnly(goals)
     -- indoors (a temple, an inn) the graph has no nodes: when you're nearer the goal than either end is to the graph,
     -- going by it would walk round the building (the user at Priestess A'moora, 2026-10-16): a straight line then
     local straight = sqrt((X2 - X1) ^ 2 + (Y2 - Y1) ^ 2)
     local nodes = s and g and straight > 40 and straight > ds + dg and astar(G, starts, goals, X2, Y2)
+    if not nodes and s and g and straight > 40 and (CITY[m1] or CITY[m2]) then
+      -- none from the nodes next to you: any of the city's within reach
+      local ok = straight > ds + dg
+      local cs = CITY[m1] and around(G, X1, Y1, r1, r1) or starts
+      local cg = CITY[m2] and around(G, X2, Y2, r2, r2) or goals
+      nodes = ok and astar(G, ledgeOnly(cs), ledgeOnly(cg), X2, Y2)
+    end
     if nodes then
       local pts, len, ride, rideCost = { X1, Y1 }, 0, nil, 0
       local px, py = X1, Y1
@@ -362,7 +407,8 @@ function W.path(m1, x1, y1, m2, x2, y2, noFly)
       -- a way far longer than the straight line is the graph's gaps, not a wall: in the cities it barely has nodes (none
       -- in the buildings: 390 yd round the north of Darnassus to Fandral, 80 yd away, the user 2026-10-16); outside
       -- them a short hop can still go round a cliff
-      local most = (CITY[m1] or CITY[m2]) and 1.6 * straight + 30 or straight < 200 and 3 * straight + 60 or math.huge
+      -- (to or from a ledge, the long way round is the way: the cliff is the wall)
+      local most = ledge and math.huge or (CITY[m1] or CITY[m2]) and 1.6 * straight + 30 or straight < 200 and 3 * straight + 60 or math.huge
       if ride or len <= most then res = { c = c1, pts = pts, len = len, ride = ride, cost = len + rideCost } end
     end
   end
@@ -407,7 +453,14 @@ end
 function W.resetPaths() cache, cacheN = {}, 0; W.newPaths() end
 -- the flight map is open: the flight paths it shows you know (by the game's node id where it says, else by name)
 function W.readTaxiMap()
-  local K, added = W.knownTaxis(), {}
+  local K, added, changed = W.knownTaxis(), {}, false
+  -- every flight master the map draws says whether you know it: unknown ones it draws too, greyed (the user,
+  -- 2026-10-17: "its telling me to go to a flight path to turn in Stormpike's Order, which requires stormwind, i dont
+  -- have stormwind, it should be taking me to the tram")
+  local function setKnown(id, yes)
+    if yes and not K[id] then K[id] = true; added[#added + 1] = id; changed = true
+    elseif not yes and K[id] then K[id] = nil; changed = true end
+  end
   local byName = {}
   for _, d in pairs(ns.walkData or {}) do
     for _, t in ipairs(d.taxis or {}) do byName[t.n:lower()] = t.id end
@@ -415,20 +468,19 @@ function W.readTaxiMap()
   if NumTaxiNodes and TaxiNodeName and TaxiNodeGetType then
     for i = 1, NumTaxiNodes() do
       local ty = TaxiNodeGetType(i)
-      if ty == "CURRENT" or ty == "REACHABLE" or ty == "DISTANT" then
-        local name = (TaxiNodeName(i) or ""):match("^([^,]+)")
-        local id = name and byName[name:lower()]
-        if id and not K[id] then K[id] = true; added[#added + 1] = id end
-      end
+      local name = (TaxiNodeName(i) or ""):match("^([^,]+)")
+      local id = name and byName[name:lower()]
+      if id then setKnown(id, ty == "CURRENT" or ty == "REACHABLE") end
     end
   end
   if C_TaxiMap and C_TaxiMap.GetAllTaxiNodes and GetTaxiMapID then
     local ok, nodes = pcall(C_TaxiMap.GetAllTaxiNodes, GetTaxiMapID())
     for _, n in ipairs(ok and nodes or {}) do
-      if n.nodeID and n.state ~= nil and not K[n.nodeID] then K[n.nodeID] = true; added[#added + 1] = n.nodeID end
+      -- state: 0 you're here, 1 you can fly there, 2 you can't (not learned)
+      if n.nodeID and n.state ~= nil then setKnown(n.nodeID, n.state == 0 or n.state == 1) end
     end
   end
-  if #added > 0 then W.resetPaths() end
+  if changed then W.resetPaths() end
   local all = {}
   for id in pairs(K) do all[#all + 1] = id end
   table.sort(all)

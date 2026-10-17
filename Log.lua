@@ -5,6 +5,14 @@
 -- Every entry: { t = server time, e = event name, lv = level, xp = XP into the level, m = uiMap, x, y, ... }.
 -- Anything the game hides from addons (secret values) is left out, never guessed.
 local _, ns = ...
+-- every frame the addon makes, with the file that made it: /wfn perf times their scripts and hides them to see what
+-- they cost (the user, 2026-10-17: "lagging again ... it is not the game")
+ns.frames = {}
+function ns.newFrame(file, ...)
+  local f = CreateFrame(...)
+  ns.frames[#ns.frames + 1] = { f = f, file = file }
+  return f
+end
 local L = {}
 ns.log = L
 
@@ -126,7 +134,7 @@ end
 -- ------------------------------------------------------------------ events
 local lastMoney, lastXP, lastLevel = nil, nil, nil
 local questNpc        -- the NPC (or object) you last talked to about a quest
-local frame = CreateFrame("Frame")
+local frame = ns.newFrame("Log", "Frame")
 local handlers = {}
 
 function handlers.QUEST_DETAIL() questNpc = unitInfo("npc") end
@@ -329,6 +337,20 @@ frame:SetScript("OnEvent", function(_, event, ...)
   end
 end)
 
+-- minutes since the game was started (a /reload doesn't count; kept in the log, which a reload doesn't wipe): the user,
+-- 2026-10-17, fps fell to 25 and stayed there through reloads, back to 60 after restarting the game
+local upFrame = ns.newFrame("Log", "Frame")
+upFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+upFrame:SetScript("OnEvent", function(_, _, initial)
+  AuDHDLog = AuDHDLog or { v = 1, sessions = {} }
+  if initial or not AuDHDLog.gameStart then AuDHDLog.gameStart = GetServerTime() end
+  upFrame:UnregisterEvent("PLAYER_ENTERING_WORLD")
+end)
+function L.upMinutes()
+  local t = AuDHDLog and AuDHDLog.gameStart
+  return t and math.floor((GetServerTime() - t) / 60) or nil
+end
+
 function L.enable()
   for event in pairs(handlers) do pcall(frame.RegisterEvent, frame, event) end
   lastMoney, lastXP, lastLevel = GetMoney(), UnitXP("player"), UnitLevel("player")
@@ -353,7 +375,7 @@ function L.enable()
       mine = math.floor(GetAddOnMemoryUsage("AuDHD"))
     end
     L.add("HEALTH", { memKB = mine, luaKB = math.floor(collectgarbage("count")),
-                      fps = GetFramerate and math.floor(GetFramerate()) or nil })
+                      fps = GetFramerate and math.floor(GetFramerate()) or nil, upMin = L.upMinutes() })
   end)
   scanObjectives()
 end

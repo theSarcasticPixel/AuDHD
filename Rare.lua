@@ -222,7 +222,7 @@ end
 
 local function makeButton()
   if button then return button end
-  button = CreateFrame("Button", "AuDHDRareButton", UIParent, "SecureActionButtonTemplate,BackdropTemplate")
+  button = ns.newFrame("Rare", "Button", "AuDHDRareButton", UIParent, "SecureActionButtonTemplate,BackdropTemplate")
   button:SetSize(270, 34)
   if button.SetBackdrop then
     button:SetBackdrop({ bgFile = "Interface\\Tooltips\\UI-Tooltip-Background", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -265,12 +265,12 @@ local function makeButton()
   end)
   button.status = button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   button.status:SetPoint("TOP", button, "BOTTOM", 0, -3)
-  local close =CreateFrame("Button", nil, button, "UIPanelCloseButton")
+  local close =ns.newFrame("Rare", "Button", nil, button, "UIPanelCloseButton")
   close:SetSize(22, 22)
   close:SetPoint("RIGHT", -2, 0)
   close:SetScript("OnClick", function() R.hideButton() end)
   -- the wheel toggle: on (lit, green) the mouse wheel targets too; again to go back to clicks only
-  wheelToggle = CreateFrame("Button", nil, button, "UIPanelButtonTemplate")
+  wheelToggle = ns.newFrame("Rare", "Button", nil, button, "UIPanelButtonTemplate")
   wheelToggle:SetSize(50, 20)
   wheelToggle:SetPoint("RIGHT", close, "LEFT", -2, 0)
   wheelToggle:SetText("Wheel")
@@ -302,7 +302,7 @@ local function makeButton()
   button:SetScript("PostClick", function(self, _, down) clicked(self, down, true) end)
   button:Hide()
   -- what the wheel clicks: shown (a binding clicks only a shown button) but not seen
-  wheel = CreateFrame("Button", "AuDHDRareWheel", UIParent, "SecureActionButtonTemplate")
+  wheel = ns.newFrame("Rare", "Button", "AuDHDRareWheel", UIParent, "SecureActionButtonTemplate")
   wheel:SetSize(1, 1)
   wheel:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -10, 10)
   wheel:SetAlpha(0)
@@ -367,7 +367,7 @@ function R.buttonTick()
 end
 
 function R.enable()
-  local f = CreateFrame("Frame")
+  local f = ns.newFrame("Rare", "Frame")
   for _, e in ipairs({ "NAME_PLATE_UNIT_ADDED", "UPDATE_MOUSEOVER_UNIT", "PLAYER_TARGET_CHANGED", "VIGNETTE_MINIMAP_UPDATED", "VIGNETTES_UPDATED", "PLAYER_REGEN_ENABLED" }) do
     pcall(f.RegisterEvent, f, e)
   end

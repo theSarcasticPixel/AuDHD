@@ -217,7 +217,7 @@ local function autoBuy()
   if ns.core.override and ns.core.override.t and ns.core.override.t:find("^Buy ammo") then ns.core.override = nil end
 end
 
-local frame = CreateFrame("Frame")
+local frame = ns.newFrame("Ammo", "Frame")
 frame:SetScript("OnEvent", function(_, event)
   if event == "TRAINER_SHOW" or event == "TRAINER_UPDATE" then
     pcall(readTrainer)

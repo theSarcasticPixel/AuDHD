@@ -154,7 +154,7 @@ end
 function W.create()
   if frame then return end
   local s = db()
-  frame = CreateFrame("Frame", "AuDHDWayArrow", UIParent)
+  frame = ns.newFrame("Way", "Frame", "AuDHDWayArrow", UIParent)
   frame:SetSize(SIZE + 120, SIZE + 40)
   frame:SetClampedToScreen(true)
   frame:SetMovable(true)
@@ -179,7 +179,7 @@ function W.create()
   labelText:SetWidth(SIZE + 120)
   labelText:SetWordWrap(false)
   -- X: done with it (the user, 2026-10-17: "the ability to x/close the vendor arrows for when you decide to keep going")
-  local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
+  local close = ns.newFrame("Way", "Button", nil, frame, "UIPanelCloseButton")
   close:SetSize(22, 22)
   close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", 0, 0)
   close:SetScript("OnClick", function()
@@ -208,6 +208,6 @@ SLASH_AUDHDWAY1 = "/wfnway"
 if not tomtom then SLASH_AUDHDWAY2 = "/way" end
 SlashCmdList.AUDHDWAY = function(msg) W.command(msg) end
 
-local ev = CreateFrame("Frame")
+local ev = ns.newFrame("Way", "Frame")
 ev:RegisterEvent("PLAYER_LOGIN")
 ev:SetScript("OnEvent", function() W.create() end)
