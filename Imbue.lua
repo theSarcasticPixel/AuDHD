@@ -200,14 +200,15 @@ function K.weapon.on()
   if st then return st.imbue end
   return has
 end
--- every imbue you know is a button of its own, the one you cast last first; all go once one is on the weapon (the user,
+-- every imbue you know is a button of its own, always in the same order, so each keeps its place (the last cast first
+-- swapped them about: the user, 2026-10-17, "if i have flametongue above rockbiter but click rockbiter, it swaps their
+-- positions"); all go once one is on the weapon (the user,
 -- 2026-10-17: "i now have rockbiter and flametongue, it only offers flametongue button though, it should show both
 -- choices, disappearing once one is on your weapon")
 local IMBUE_ORDER = { "Rockbiter Weapon", "Flametongue Weapon", "Frostbrand Weapon", "Windfury Weapon" }
 local function knownImbues()
-  local d, out = db(), {}
-  if d.spell and known(IMBUES, d.spell) then out[1] = d.spell end
-  for _, name in ipairs(IMBUE_ORDER) do if name ~= d.spell and known(IMBUES, name) then out[#out + 1] = name end end
+  local out = {}
+  for _, name in ipairs(IMBUE_ORDER) do if known(IMBUES, name) then out[#out + 1] = name end end
   return out
 end
 function K.weapon.source()
@@ -340,50 +341,79 @@ KINDS[#KINDS + 1] = "oil"
 for _, g in ipairs(GROUPS) do KINDS[#KINDS + 1] = "buff_" .. g.class .. "_" .. g.key end
 
 -- ------------------------------------------------------------------ the buttons
+-- a square action button: the icon, a short name under it, the count on it (an oil's charges), the whole sentence in its
+-- tooltip, a small close badge on its corner; side by side, not long bars (the user, 2026-10-17: "a bit verbose, and dont
+-- look button-y enough ... the x to close isn't very well aligned")
+local SIZE, GAP = 40, 64
 local function makeButton(kind)
   local k = K[kind]
   local b = ns.newFrame("Imbue", "Button", "AuDHD_" .. kind .. "Button", UIParent, "SecureActionButtonTemplate,BackdropTemplate")
-  b:SetSize(380, 34)
+  b:SetSize(SIZE, SIZE)
   if b.SetBackdrop then
-    b:SetBackdrop({ bgFile = "Interface\\Tooltips\\UI-Tooltip-Background", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
-                    tile = true, tileSize = 16, edgeSize = 12, insets = { left = 3, right = 3, top = 3, bottom = 3 } })
-    b:SetBackdropColor(0.05, 0.12, 0.25, 0.92)
+    b:SetBackdrop({ edgeFile = "Interface\\Buttons\\WHITE8X8", edgeSize = 2 })
+    b:SetBackdropBorderColor(1, 0.75, 0.1, 1)   -- gold: it wants a click
   end
-  local key = kind .. "Button"
+  local key = kind .. "Btn"   -- not the old bars' places (they were 380 wide)
   local pos = AuDHDDB[key]
-  -- stacked down from under the rare button's place, one row per kind your class has
-  local row = 0
+  -- in a row under the rare button's place, one per kind your class has
+  local col = 0
   for _, other in ipairs(KINDS) do
     if other == kind then break end
-    if K[other].on() ~= nil then row = row + 1 end
+    if K[other].on() ~= nil then col = col + 1 end
   end
-  if pos then b:SetPoint(pos.p, UIParent, pos.rp, pos.x, pos.y) else b:SetPoint("TOP", UIParent, "TOP", 0, -140 - 38 * row) end
+  if pos then b:SetPoint(pos.p, UIParent, pos.rp, pos.x, pos.y) else b:SetPoint("TOP", UIParent, "TOP", -96 + GAP * col, -150) end
+  -- on release only: a press that turns into a drag mustn't cast (the user, 2026-10-17: "dragging the wizard oil/rockbiter
+  -- icons casts them")
+  -- (the game's "cast on key down" setting makes a secure button act only on the press, so up alone did nothing: the
+  -- user, 2026-10-17, "neither does clicking them". Both registered, and the button told to act on the release)
   b:RegisterForClicks("AnyUp", "AnyDown")
+  b:SetAttribute("useOnKeyDown", false)
   b:SetMovable(true)
+  b:SetClampedToScreen(true)
   b:RegisterForDrag("LeftButton")
-  b:SetScript("OnDragStart", function(self) if not InCombatLockdown() then self:StartMoving() end end)
+  -- while dragged the button does nothing: the release that ends the drag is a click on it too, so its action comes
+  -- back only on the next frame, after that click
+  b:SetScript("OnDragStart", function(self)
+    if InCombatLockdown() then return end
+    self.dragType = self:GetAttribute("type")
+    self:SetAttribute("type", nil)
+    self:StartMoving()
+  end)
   b:SetScript("OnDragStop", function(self)
     self:StopMovingOrSizing()
+    C_Timer.After(0, function()
+      if self.dragType and not InCombatLockdown() and not self:GetAttribute("type") then self:SetAttribute("type", self.dragType) end
+      self.dragType = nil
+    end)
     local p, _, rp, x, y = self:GetPoint()
     AuDHDDB[key] = { p = p, rp = rp, x = x, y = y }
   end)
   b.icon = b:CreateTexture(nil, "ARTWORK")
-  b.icon:SetSize(22, 22)
-  b.icon:SetPoint("LEFT", 6, 0)
+  b.icon:SetPoint("TOPLEFT", 2, -2)
+  b.icon:SetPoint("BOTTOMRIGHT", -2, 2)
+  b.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)   -- the icon's own grey rim trimmed off
+  b:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+  b:SetPushedTexture("Interface\\Buttons\\UI-Quickslot-Depress")
+  b.count = b:CreateFontString(nil, "OVERLAY", "NumberFontNormal")
+  b.count:SetPoint("BOTTOMRIGHT", -3, 3)
   b.text = b:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-  b.text:SetPoint("LEFT", b.icon, "RIGHT", 6, 0)
-  b.text:SetPoint("RIGHT", -28, 0)
-  b.text:SetJustifyH("LEFT")
-  local hl = b:CreateTexture(nil, "HIGHLIGHT")
-  hl:SetPoint("TOPLEFT", 3, -3)
-  hl:SetPoint("BOTTOMRIGHT", -3, 3)
-  hl:SetColorTexture(0.4, 0.7, 1, 0.18)
+  b.text:SetPoint("TOP", b, "BOTTOM", 0, -3)
+  b.text:SetWidth(GAP - 4)
+  b.text:SetJustifyH("CENTER")
+  b.text:SetMaxLines(2)
+  b:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+    GameTooltip:SetText(self.tip or "", 1, 1, 1)
+    GameTooltip:Show()
+  end)
+  b:SetScript("OnLeave", function() GameTooltip:Hide() end)
   local close = ns.newFrame("Imbue", "Button", nil, b, "UIPanelCloseButton")
-  close:SetSize(22, 22)
-  close:SetPoint("RIGHT", -2, 0)
+  close:SetSize(20, 20)
+  close:SetPoint("CENTER", b, "TOPRIGHT", 0, 0)
+  close:SetFrameLevel(b:GetFrameLevel() + 2)
   close:SetScript("OnClick", function() k.closed = true I.hide(kind) end)
   -- the oil's button: what goes on the weapon next is the oil
-  if kind == "oil" then b:SetScript("PreClick", function() db().tItem = GetTime() end) end
+  if kind == "oil" then b:SetScript("PreClick", function(self) if not self.dragType then db().tItem = GetTime() end end) end
   b:Hide()
   return b
 end
@@ -417,13 +447,21 @@ function I.show(kind, src)
     b:SetAttribute("unit", src.unit)   -- your own buffs on you, whoever you have targeted
     b.msg = k.text and k.text(src) or ("No %s on: click to cast it"):format(src.spell)
     b.icon:SetTexture(spellIcon(src.spell))
+    b.short = src.spell:gsub(" Weapon$", "")
+    b.tip = src.spell
+    b.count:SetText("")
   else
     b:SetAttribute("type", "macro")
     b:SetAttribute("macrotext", ("/use item:%d\n/use 16"):format(src.item))
     b.msg = ("No oil or stone on your weapon: click to put on %s (%d left)"):format(itemName(src.item), uses(src.item))
     b.icon:SetTexture(itemIcon(src.item))
+    b.short = (itemName(src.item) or "Oil"):gsub("^Minor ", ""):gsub("^Lesser ", "")
+    b.count:SetText(uses(src.item))
+    b.tip = ("%s (%d left)"):format(itemName(src.item) or "Oil", uses(src.item))
   end
-  b.text:SetText(b.msg)
+  -- shown again mid-drag (a buff ran out): still nothing on the release that ends the drag
+  if b.dragType then b.dragType = b:GetAttribute("type") b:SetAttribute("type", nil) end
+  b.text:SetText(b.short)
   b:SetAlpha(1)
   if b.on then return end
   b.on = true
