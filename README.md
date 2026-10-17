@@ -146,8 +146,7 @@ AuDHD keeps a log of what it saw and decided (steps, positions, pop-ups, frame t
 1. Type `/audhd note what happened` right away.
 2. `/reload` so the log is saved.
 3. Find the log file: `WTF\Account\<your account>\SavedVariables\AuDHD.lua` in your WoW Forever folder.
-4. Email it to **[sarcasticpixel.com@gmail.com](mailto:sarcasticpixel.com@gmail.com)** with a line about what went wrong, or
-   [open an issue](https://github.com/theSarcasticPixel/AuDHD/issues) and attach it there.
+4. [Open an issue](https://github.com/theSarcasticPixel/AuDHD/issues), say what went wrong, and attach the file.
 
 The log contains your character's name and route progress, nothing else.
 
