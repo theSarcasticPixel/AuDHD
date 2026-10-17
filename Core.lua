@@ -1735,6 +1735,6 @@ SlashCmdList.AUDHD = function(input)
     C.advance("route")
     say("route reset to step 1 (steps you've done are skipped again)")
   else
-    say("/wfn (show/hide), /wfn note <text>, /wfn done, /wfn later, /wfn back, /wfn goto <n>, /wfn route [name], /wfn routes, /wfn settings, /wfn minimap on|off, /wfn auto, /wfn ammo [off|<count>], /wfn arrow, /wfn map on|off, /wfn threat on|off, /wfn rares all|route|off, /wfn perf, /wfn spec [name], /wfn imbue [off|on], /wfn shards [off|on|max <n>|low <n>], /wfn buffs [off|on], /wfn announce [off|on], /wfn askbuffs [off|on], /wfn blocked, /wfn unblock, /wfn log, /wfn reset")
+    say("/wfn (show/hide), /wfn note <text>, /wfn done, /wfn later, /wfn back, /wfn goto <n>, /wfn route [name], /wfn routes, /wfn settings, /wfn minimap on|off, /wfn auto, /wfn ammo [off|<count>], /wfn arrow, /wfn map on|off, /wfn threat on|off, /wfn rares all|route|off, /wfn perf, /wfn spec [name], /wfn imbue [off|on], /wfn shards [off|on|max <n>|low <n>|lock|unlock|reset], /wfn buffs [off|on], /wfn announce [off|on], /wfn askbuffs [off|on], /wfn blocked, /wfn unblock, /wfn log, /wfn reset")
   end
 end

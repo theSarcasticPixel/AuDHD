@@ -38,6 +38,12 @@ local LEFT = {
   { "Buttons to ask the party for buffs", function() return not (AuDHDDB.buffAsk and AuDHDDB.buffAsk.off) end,
     function(on) if ns.buffAsk then ns.buffAsk.command(on and "on" or "off") end end,
     "In a group with a priest, mage, druid or paladin: a click asks them in party chat for a buff you don't have" },
+  { "Warlock" },
+  { "Soul shard counter", function() return ns.shards and ns.shards.isOn() end,
+    function(on) if ns.shards then ns.shards.command(on and "on" or "off") end end,
+    "Your shards in your bags, a warning when low, extras deleted past your max so Drain Soul keeps working. Mouse wheel on it sets the max, Shift + wheel the low mark" },
+  { "Lock the shard counter", function() return ns.shards and ns.shards.isLocked() end,
+    function(on) if ns.shards then ns.shards.command(on and "lock" or "unlock") end end },
 }
 local RIGHT = {
   { "Automation (hold Shift to pause it)" },
@@ -68,6 +74,11 @@ local function refresh()
     frame.syncing = true
     frame.arrowScale:SetValue((AuDHDDB.arrow and AuDHDDB.arrow.scale) or 1)
     if frame.rangeGap and ns.range then frame.rangeGap:SetValue(sub("range").gap or ns.range.PLATE_GAP) end
+    if frame.shardMax and ns.shards then
+      local mx, lo = ns.shards.values()
+      if not frame.shardMax:HasFocus() then frame.shardMax:SetText(tostring(mx)) end
+      if not frame.shardLow:HasFocus() then frame.shardLow:SetText(tostring(lo)) end
+    end
     frame.syncing = nil
   end
 end
@@ -182,6 +193,34 @@ local function create()
   end)
   frame.rangeGap = gap
   y1 = y1 - 60
+  -- soul shards: how many to keep, and how few is low (the user, 2026-10-17: "a number input field in the settings")
+  local function numberBox(text, x, cmd)
+    local l = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    l:SetPoint("TOPLEFT", x, y1 - 12)
+    l:SetText(text)
+    local b = ns.newFrame("Settings", "EditBox", nil, frame, "InputBoxTemplate")
+    b:SetSize(32, 20)
+    b:SetPoint("LEFT", l, "RIGHT", 10, 0)
+    b:SetAutoFocus(false)
+    b:SetNumeric(true)
+    b:SetMaxLetters(2)
+    local function apply(self)
+      local v = tonumber(self:GetText())
+      if v and ns.shards then ns.shards.command(cmd .. " " .. v) end
+      refresh()
+    end
+    b:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    b:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    b:SetScript("OnEditFocusLost", apply)
+    return b
+  end
+  local sl = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  sl:SetPoint("TOPLEFT", 14, y1 - 8)
+  sl:SetText("Soul shards")
+  y1 = y1 - 22
+  frame.shardMax = numberBox("Keep at most", 18, "max")
+  frame.shardLow = numberBox("Low at", 18 + 120, "low")
+  y1 = y1 - 34
   local bottom = math.min(y1, y2) - 8
   local routes = ns.newFrame("Settings", "Button", nil, frame, "UIPanelButtonTemplate")
   routes:SetSize(110, 22)
