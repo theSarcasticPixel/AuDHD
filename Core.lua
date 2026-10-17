@@ -1,6 +1,10 @@
 -- The route engine: which step you're on (worked out from your quest log, so it survives reloads and playing out of
 -- order), the waypoint arrow, the stretch pop-up, and the slash commands. UI.lua draws it; Log.lua records it all.
 local _, ns = ...
+-- routes that aren't published (a test route) come from a local addon of their own, AuDHD_Private, which loads after
+-- this one and adds them here
+ns.routes = ns.routes or {}
+AuDHDRoutes = ns.routes
 local C = {}
 ns.core = C
 

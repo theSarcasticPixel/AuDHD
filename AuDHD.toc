@@ -13,7 +13,6 @@ Route_dwarfgnome_any_start.lua
 Route_dwarf_hunter_start.lua
 Route_gnome_warlock_start.lua
 Route_dwarf_shaman_start.lua
-Route_testing_needed.lua
 Route_nelf_hunter_1-12.lua
 Route_nelf_hunter_engineer_1-12.lua
 Route_nelf_hunter_14-20_darkshore.lua
