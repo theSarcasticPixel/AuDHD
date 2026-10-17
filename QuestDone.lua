@@ -1,7 +1,9 @@
 -- A quest's objectives all done: said in your chat, and to your party when you're in one, as
 -- "{star} <quest> Complete (AuDHD)" (the user, 2026-10-17: "notifications for when a quest objective is complete,
 -- sending it to your party if you're in one"; AuDHD: the addon's name to come, zQuest was taken). Only as it happens: a quest already
--- done when you log in, or done as you take it (a letter to deliver), isn't said. /wfn announce [off|on].
+-- done when you log in, or done as you take it (a letter to deliver), isn't said. /wfn announce [off|on|party on|party off].
+-- The party's copy has a switch of its own (the user, 2026-10-18: "lets make the quest complete message to party be
+-- optional/something controlled in settings").
 local _, ns = ...
 local Q = {}
 ns.questDone = Q
@@ -13,6 +15,7 @@ local isSecret = issecretvalue or function() return false end
 
 local state       -- [q] = true (done) / false (not yet); nil until the first look after login
 local function off() return AuDHDDB and AuDHDDB.announceOff end
+local function partyOff() return AuDHDDB and AuDHDDB.announcePartyOff end
 
 local function channel()
   if IsInGroup and LE_PARTY_CATEGORY_INSTANCE and IsInGroup(LE_PARTY_CATEGORY_INSTANCE)
@@ -22,7 +25,7 @@ end
 
 function Q.say(title)
   if DEFAULT_CHAT_FRAME and DEFAULT_CHAT_FRAME.AddMessage then DEFAULT_CHAT_FRAME:AddMessage(("%s |cffffd200%s Complete|r %s"):format(STAR_TEXT, title, TAG)) end
-  local ch = channel()
+  local ch = not partyOff() and channel() or nil
   if ch and SendChatMessage then pcall(SendChatMessage, ("%s %s Complete %s"):format(STAR_CHAT, title, TAG), ch) end
   if ns.log then ns.log.add("QUEST_DONE_SAID", { title = title, ch = ch }) end
 end
@@ -55,11 +58,17 @@ end
 
 function Q.command(arg)
   arg = (arg or ""):lower()
+  local p = arg:match("^party%s+(%a+)$")
+  if p == "off" or p == "on" then
+    AuDHDDB.announcePartyOff = p == "off" or nil
+    return "quest complete messages to your party " .. p
+  end
   if arg == "off" or arg == "on" then
     AuDHDDB.announceOff = arg == "off" or nil
     return "quest complete messages " .. arg
   end
-  return "quest complete messages are " .. (off() and "off" or "on") .. " (/wfn announce off|on)"
+  return "quest complete messages are " .. (off() and "off" or "on") .. ", to your party " .. (partyOff() and "off" or "on")
+    .. " (/wfn announce off|on, /wfn announce party off|on)"
 end
 
 local frame = ns.newFrame("QuestDone", "Frame")

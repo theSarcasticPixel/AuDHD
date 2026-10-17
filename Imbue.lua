@@ -504,6 +504,11 @@ function I.text(kind)
   local b = K[kind] and K[kind].button
   return b and b.on and b.msg or nil
 end
+-- a self buff reminder switched off (the settings' checkbox: off when any is)
+function I.anyBuffOff()
+  for _, kind in ipairs(KINDS) do if K[kind].buff and K[kind].off then return true end end
+  return false
+end
 function I.sourceOf(key)
   for _, v in pairs(K) do if v.group and v.group.key == key and v.on() ~= nil then return v.source() end end
 end

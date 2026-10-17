@@ -40,7 +40,7 @@ local function apply()
   pending = false
   if not button then make() end
   local id = wanted
-  if id and count(id) > 0 then
+  if id and count(id) > 0 and not AuDHDDB.useItemOff then
     button.item = id
     button:SetAttribute("item", "item:" .. id)
     local icon = (C_Item and C_Item.GetItemIconByID and C_Item.GetItemIconByID(id)) or (GetItemIcon and GetItemIcon(id))
@@ -57,7 +57,7 @@ end
 function M.refresh()
   local step = ns.core and ns.core.current and ns.core.current()
   local id = step and step.ui
-  if id ~= wanted or pending or (button and (button:IsShown() ~= (id and count(id) > 0 or false))) then
+  if id ~= wanted or pending or (button and (button:IsShown() ~= (id and count(id) > 0 and not AuDHDDB.useItemOff or false))) then
     wanted = id
     apply()
   end

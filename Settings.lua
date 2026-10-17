@@ -38,6 +38,9 @@ local LEFT = {
   { "Buttons to ask the party for buffs", function() return not (AuDHDDB.buffAsk and AuDHDDB.buffAsk.off) end,
     function(on) if ns.buffAsk then ns.buffAsk.command(on and "on" or "off") end end,
     "In a group with a priest, mage, druid or paladin: a click asks them in party chat for a buff you don't have" },
+  { "Click-cast healing frames", function() return ns.heal and ns.heal.isOn() end,
+    function(on) if ns.heal then ns.heal.command(on and "on" or "off") end end,
+    "Your party in a row near the bottom of the screen: click one with a mouse button to cast that button's spell on them. Set the spells with the Click-cast spells button below" },
   { "Warlock" },
   { "Soul shard counter", function() return ns.shards and ns.shards.isOn() end,
     function(on) if ns.shards then ns.shards.command(on and "on" or "off") end end,
@@ -64,6 +67,32 @@ local RIGHT = {
   { "Mouse wheel targets rares", function() return AuDHDDB.rareWheel end,
     function(on) AuDHDDB.rareWheel = on or nil if ns.rare then ns.rare.applyWheel() end end,
     "While the rare button shows, scrolling the mouse wheel clicks it (cycles /tar through nearby rares)" },
+  -- every part of the addon can be switched off (the user, 2026-10-17: "we need settings to turn off/on pretty much
+  -- every part of the addon")
+  { "Reminders and info" },
+  { "Weapon imbue and oil buttons", function() return not (AuDHDDB.buffOff and AuDHDDB.buffOff.weapon) end,
+    function(on) if ns.imbue then ns.imbue.command(on and "on" or "off", "weapon") end end,
+    "A button when your weapon has no imbue, oil or stone on it" },
+  { "Self-buff buttons", function() return not (AuDHDDB.buffOff and ns.imbue and ns.imbue.anyBuffOff()) end,
+    function(on) if ns.imbue then ns.imbue.command(on and "on" or "off", "buffs") end end,
+    "A button when a buff of your own (Lightning Shield, Demon Skin, an aspect) has dropped off" },
+  { "Sell and train reminders", function() return not AuDHDDB.servicesOff end,
+    function(on) AuDHDDB.servicesOff = not on or nil if ns.services then ns.services.check() end end,
+    "Near a vendor with full bags, or your trainer with new skills to learn" },
+  { "Quest item button", function() return not AuDHDDB.useItemOff end,
+    function(on) AuDHDDB.useItemOff = not on or nil if ns.useItem then ns.useItem.refresh() end end,
+    "A button for the item the current step needs you to use" },
+  { "Quest complete message", function() return not AuDHDDB.announceOff end,
+    function(on) if ns.questDone then ns.questDone.command(on and "on" or "off") end end,
+    "In your own chat" },
+  { "  ...and tell my party", function() return not AuDHDDB.announcePartyOff end,
+    function(on) if ns.questDone then ns.questDone.command("party " .. (on and "on" or "off")) end end,
+    "Also sends it to party chat when you're in a group" },
+  { "Drop chances on mob tooltips", function() return not AuDHDDB.dropsOff end,
+    function(on) AuDHDDB.dropsOff = not on or nil end },
+  { "Party quest progress", function() return not AuDHDDB.partyOff end,
+    function(on) AuDHDDB.partyOff = not on or nil end,
+    "What your group (with AuDHD) has done on quests you share" },
 }
 
 local checks = {}
@@ -226,7 +255,20 @@ local function create()
   routes:SetSize(110, 22)
   routes:SetPoint("TOPLEFT", 12, bottom)
   routes:SetText("Pick a route")
-  routes:SetScript("OnClick", function() if ns.picker then ns.picker.show() end end)
+  routes:SetScript("OnClick", function()
+    if not ns.picker then return end
+    frame:Hide()
+    ns.picker.show(function() S.show() end)
+  end)
+  local heals = ns.newFrame("Settings", "Button", nil, frame, "UIPanelButtonTemplate")
+  heals:SetSize(130, 22)
+  heals:SetPoint("LEFT", routes, "RIGHT", 8, 0)
+  heals:SetText("Click-cast spells")
+  heals:SetScript("OnClick", function()
+    if not ns.heal then return end
+    frame:Hide()
+    ns.heal.setup(function() S.show() end)
+  end)
   frame:SetSize(WIDTH, -bottom + 34)
   -- Escape closes it
   if UISpecialFrames then table.insert(UISpecialFrames, "AuDHDSettings") end

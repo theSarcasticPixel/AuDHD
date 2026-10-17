@@ -18,6 +18,7 @@ local function channel()
   if IsInGroup and IsInGroup() then return "PARTY" end
 end
 local function send(msg)
+  if AuDHDDB and AuDHDDB.partyOff then return end   -- off in the settings: nothing sent, nothing shown
   local ch = channel()
   if ch and C_ChatInfo and C_ChatInfo.SendAddonMessage then C_ChatInfo.SendAddonMessage(PREFIX, msg, ch) end
 end
@@ -95,6 +96,7 @@ end
 
 -- what the others have on quest q: "Bob 3/7, Amy done" for objective o (1-based; nil: the whole quest), or nil
 function P.progress(q, o)
+  if AuDHDDB and AuDHDDB.partyOff then return nil end
   local out = {}
   for who, qs in pairs(data) do
     local d = qs[q]

@@ -55,9 +55,14 @@ Hold **Shift** while talking to an NPC to pause all of these.
 - **Ask for buffs.** In a group with a priest, mage, druid or paladin, a button appears for each buff you're missing
   that someone there can give. One click asks them in party chat, politely and by name. You don't need to know which
   class gives what.
-- **Click-cast healing.** Your party (you first) as health bars in a row near the bottom of the screen. Pick a spell and
-  rank for each mouse button, then click someone to cast it on them. Choose spells from your spellbook or drag them in.
-  Bars show health missing and fade when someone is out of range. Switch it on in the settings; it starts off.
+- **Click-cast healing.** Your party (you first) as health bars in a row near the bottom of the screen. Click someone to
+  cast on them:
+  - Pick a spell and rank for each mouse button, and for Shift + click and Ctrl + click too. Choose from your spellbook
+    or drag a spell in. Right-click a slot to clear it. Spells are saved per character.
+  - Your own heals over time and buffs show along the bottom of each bar, with a timer sweep, so you can see who still
+    has your Rejuvenation or Renew. Everyone else's buffs show in a row above the bar.
+  - Bars show health missing, Dead or Offline, and fade when someone is out of range.
+  - Works in combat. Turn it on in the settings, or just pick a spell (`/audhd heal setup`).
 - **Party quest progress.** See how far your group has got on quests you share ("Bob 3/7, Amy done"). Only party
   members who also run AuDHD show up.
 

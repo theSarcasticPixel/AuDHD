@@ -1712,6 +1712,8 @@ SlashCmdList.AUDHD = function(input)
     say(ns.buffAsk.command(rest))
   elseif cmd == "imbue" and ns.imbue then
     say(ns.imbue.command(rest))
+  elseif cmd == "heal" and ns.heal then
+    say(ns.heal.command(rest))
   elseif cmd == "shards" and ns.shards then
     say(ns.shards.command(rest))
   elseif (cmd == "buffs" or cmd == "aspect") and ns.imbue then
@@ -1735,6 +1737,6 @@ SlashCmdList.AUDHD = function(input)
     C.advance("route")
     say("route reset to step 1 (steps you've done are skipped again)")
   else
-    say("/wfn (show/hide), /wfn note <text>, /wfn done, /wfn later, /wfn back, /wfn goto <n>, /wfn route [name], /wfn routes, /wfn settings, /wfn minimap on|off, /wfn auto, /wfn ammo [off|<count>], /wfn arrow, /wfn map on|off, /wfn threat on|off, /wfn rares all|route|off, /wfn perf, /wfn spec [name], /wfn imbue [off|on], /wfn shards [off|on|max <n>|low <n>|lock|unlock|reset], /wfn buffs [off|on], /wfn announce [off|on], /wfn askbuffs [off|on], /wfn blocked, /wfn unblock, /wfn log, /wfn reset")
+    say("/wfn (show/hide), /wfn note <text>, /wfn done, /wfn later, /wfn back, /wfn goto <n>, /wfn route [name], /wfn routes, /wfn settings, /wfn minimap on|off, /wfn auto, /wfn ammo [off|<count>], /wfn arrow, /wfn map on|off, /wfn threat on|off, /wfn rares all|route|off, /wfn perf, /wfn spec [name], /wfn imbue [off|on], /wfn shards [off|on|max <n>|low <n>|lock|unlock|reset], /wfn heal [on|off|setup], /wfn buffs [off|on], /wfn announce [off|on], /wfn askbuffs [off|on], /wfn blocked, /wfn unblock, /wfn log, /wfn reset")
   end
 end

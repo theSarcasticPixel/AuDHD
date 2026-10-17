@@ -157,6 +157,7 @@ function M.click(kind, which)
 end
 
 function M.check()
+  if AuDHDDB.servicesOff then drop("vendor") drop("trainer") return end
   if UnitOnTaxi and UnitOnTaxi("player") then return end
   local P = player()
   if not P then return end

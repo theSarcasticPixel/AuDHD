@@ -80,6 +80,12 @@ local function create()
   local close = ns.newFrame("RoutePicker", "Button", nil, frame, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", -2, -2)
   close:SetScript("OnClick", function() frame:Hide() end)
+  -- closed: back to the window it was opened from (the settings hide while it's up)
+  frame:SetScript("OnHide", function()
+    local back = frame.back
+    frame.back = nil
+    if back then back() end
+  end)
   frame:Hide()
 end
 
@@ -123,8 +129,9 @@ local function row(i)
   return b
 end
 
-function P.show()
+function P.show(back)
   if not frame then create() end
+  frame.back = back
   local list = P.choices()
   for _, b in ipairs(rows) do b:Hide() end
   local current = AuDHDDB.route

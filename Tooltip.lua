@@ -170,7 +170,7 @@ function D.lines(unit)
   return out
 end
 local function addLines(tooltip)
-  if tooltip ~= GameTooltip then return end
+  if tooltip ~= GameTooltip or (AuDHDDB and AuDHDDB.dropsOff) then return end
   local _, unit = tooltip:GetUnit()
   if not unit or isSecret(unit) then return end
   for _, l in ipairs(D.lines(unit)) do

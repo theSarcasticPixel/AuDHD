@@ -1,8 +1,8 @@
 ## Interface: 16001
 ## Title: AuDHD
-## Notes: Planned leveling route (GPS-style) with a research logger. /audhd (or /wfn) for commands.
+## Notes: Remembers the small stuff: buff and ammo reminders, easy group buffs and healing, and what to do next. /audhd settings
 ## Author: theSarcasticPixel
-## Version: 0.2.2
+## Version: 0.2.3
 ## SavedVariables: AuDHDDB, AuDHDLog
 
 Route_nelf_hunter_start.lua
@@ -46,5 +46,6 @@ Imbue.lua
 BuffAsk.lua
 UseItem.lua
 Shards.lua
+Heal.lua
 Tooltip.lua
 Perf.lua
