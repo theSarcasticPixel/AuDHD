@@ -118,6 +118,13 @@ function A.update()
     tex:Hide(); distText:SetText(""); labelText:SetText("")
     return
   end
+  -- in a dungeon the game gives no position: nothing to point with, and the words sat over the party frames (the user,
+  -- 2026-10-18: "what is this 'another zone or continent' text?"). Quiet until you're out
+  local inside, kind = IsInInstance and IsInInstance()
+  if inside and (kind == "party" or kind == "raid") then
+    tex:Hide(); thenTex:Hide(); thenText:SetText(""); distText:SetText(""); labelText:SetText("")
+    return
+  end
   local d, turn = ns.core.bearing(step)
   -- along the walking way (Walk.lua) when there is one: point at the path a little ahead, count the yards to walk
   local ride
@@ -134,7 +141,10 @@ function A.update()
   labelText:SetText(shortLabel(step) .. (ride and ("  |cffaaaaaa(" .. ride .. ")|r") or ""))
   if not d then
     tex:Hide()
-    distText:SetText(step.esc and "|cffaaaaaafollow the escort|r" or "|cffaaaaaaanother zone or continent|r")
+    -- somewhere the arrow can't point from here: say where
+    local info = step.m and C_Map.GetMapInfo and C_Map.GetMapInfo(step.m)
+    distText:SetText(step.esc and "|cffaaaaaafollow the escort|r"
+      or ("|cffaaaaaain %s|r"):format(info and info.name or "another zone or continent"))
     return
   end
   if d < 10 then

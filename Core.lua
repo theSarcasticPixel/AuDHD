@@ -637,6 +637,10 @@ local CAVES = {
   ["Grizzled Den"] = { m = 1426, door = { 42, 54 }, box = { 39.5, 44.5, 44.5, 56.5 } },
   -- the Fire Tar for Call of Fire, the user 2026-10-17: "the entrance to the cave for the Fire Tar is 35.5,18.8"
   ["Silver Stream Mine"] = { m = 1432, door = { 35.5, 18.8 }, box = { 33.5, 38.5, 19.3, 29 } },
+  -- 20-30 (from the guide's way in, not yet seen in game: listed in the 20-30 doc to check)
+  ["Rethban Caverns"] = { m = 1433, door = { 14.5, 32.0 }, box = { 11, 17, 20, 31.5 } },
+  ["Whelgar's Excavation"] = { m = 1437, door = { 38.2, 50.9 }, box = { 37.5, 41, 51.2, 55 } },
+  ["Vul'Gol Ogre Mound"] = { m = 1431, door = { 34.6, 77.6 }, box = { 34, 39, 77.5, 86 } },
 }
 local function caveAt(m, x, y)
   for name, cv in pairs(CAVES) do
@@ -1472,6 +1476,22 @@ local function soon(reason)
   C_Timer.After(0.4, function() pending = false; C.advance(reason) end)
 end
 local function currentKind() local s = C.current(); return s and s.k, s end
+-- a flight master's chat window has a "show me where I can fly" line (the taxi icon); any other NPC's doesn't
+local function flightGossip()
+  local opts = C_GossipInfo and C_GossipInfo.GetOptions and C_GossipInfo.GetOptions() or {}
+  for _, o in ipairs(opts) do
+    if o.icon == 132057 or (o.type and tostring(o.type):lower() == "taxi") then return true end
+  end
+  return false
+end
+-- talking to a flight master learns its path (told = the game said "New flight path discovered")
+function C.flightLearned(told)
+  if not ns.walk or not ns.walk.learnHere or not (told or flightGossip()) then return end
+  local id = ns.walk.learnHere()
+  if id then log("TAXI_LEARNED", { id = id }) end
+  if currentKind() == "discover" then C.markDone("flight master") end
+  if ns.ui then ns.ui.refresh() end
+end
 -- an ammo step is done once you carry (nearly) the amount it buys up to: bought just now, or already
 function ammoCheck()
   if currentKind() ~= "buyammo" or not ns.ammo then return end
@@ -1509,6 +1529,9 @@ local events = {
     local k = currentKind()
     if k == "train" or k == "learn" or k == "learnweapon" or k == "visit" then C.markDone("trainer visited") end
   end,
+  -- a flight master's chat window: the path is yours from now (Forever opens it before the flight map)
+  GOSSIP_SHOW = function() C.flightLearned(false) end,
+  UI_INFO_MESSAGE = function(_, msg) if msg and ERR_NEWTAXIPATH and msg == ERR_NEWTAXIPATH then C.flightLearned(true) end end,
   TAXIMAP_OPENED = function()
     if currentKind() == "discover" then C.markDone("flight master") end
     -- the flight paths you know: the arrow flies you when it's quicker (Walk.lua), the planner starts from them

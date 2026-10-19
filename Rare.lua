@@ -223,7 +223,9 @@ end
 local function makeButton()
   if button then return button end
   button = ns.newFrame("Rare", "Button", "AuDHDRareButton", UIParent, "SecureActionButtonTemplate,BackdropTemplate")
-  button:SetSize(270, 34)
+  -- even gaps all round (the user, 2026-10-18: "functional but not well aligned"): the rare's face on the left, the
+  -- buttons on the right, everything centred top to bottom
+  button:SetSize(300, 44)
   if button.SetBackdrop then
     button:SetBackdrop({ bgFile = "Interface\\Tooltips\\UI-Tooltip-Background", edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
                          tile = true, tileSize = 16, edgeSize = 12, insets = { left = 3, right = 3, top = 3, bottom = 3 } })
@@ -241,14 +243,29 @@ local function makeButton()
     local p, _, rp, x, y = self:GetPoint()
     AuDHDDB.rareButton = { p = p, rp = rp, x = x, y = y }
   end)
-  button.icon = button:CreateTexture(nil, "ARTWORK")
-  button.icon:SetSize(22, 22)
-  button.icon:SetPoint("LEFT", 6, 0)
+  -- the rare's face (the user, 2026-10-18: "show the icon/faceplate of the rare instead of a skull"): its model, zoomed
+  -- to the head, in a dark frame; the skull while it loads or when the game can't show it
+  button.face = CreateFrame("Frame", nil, button, "BackdropTemplate")
+  button.face:SetSize(34, 34)
+  button.face:SetPoint("LEFT", 5, 0)
+  if button.face.SetBackdrop then
+    button.face:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8x8", edgeFile = "Interface\\Buttons\\WHITE8x8", edgeSize = 1 })
+    button.face:SetBackdropColor(0, 0, 0, 0.8)
+    button.face:SetBackdropBorderColor(0.8, 0.6, 0.2, 0.9)
+  end
+  button.icon = button.face:CreateTexture(nil, "ARTWORK")
+  button.icon:SetSize(24, 24)
+  button.icon:SetPoint("CENTER")
   button.icon:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcon_8")
+  button.model = CreateFrame("PlayerModel", nil, button.face)
+  button.model:SetPoint("TOPLEFT", 1, -1)
+  button.model:SetPoint("BOTTOMRIGHT", -1, 1)
+  button.model:Hide()
   button.text = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-  button.text:SetPoint("LEFT", button.icon, "RIGHT", 6, 0)
-  button.text:SetPoint("RIGHT", -76, 0)
+  button.text:SetPoint("LEFT", button.face, "RIGHT", 8, 0)
+  button.text:SetPoint("RIGHT", -92, 0)
   button.text:SetJustifyH("LEFT")
+  button.text:SetWordWrap(false)
   -- feel like a button (the user, 2026-10-16: "clicking it has no feedback"): lit on hover, pressed in while held, a
   -- click sound, and under it whether the click found the rare
   local hl = button:CreateTexture(nil, "HIGHLIGHT")
@@ -256,23 +273,23 @@ local function makeButton()
   hl:SetPoint("BOTTOMRIGHT", -3, 3)
   hl:SetColorTexture(1, 0.8, 0.3, 0.18)
   button:HookScript("OnMouseDown", function(self)
-    self.icon:SetPoint("LEFT", 7, -1)
+    self.face:SetPoint("LEFT", 6, -1)
     if self.SetBackdropColor then self:SetBackdropColor(0.12, 0, 0, 0.95) end
   end)
   button:HookScript("OnMouseUp", function(self)
-    self.icon:SetPoint("LEFT", 6, 0)
+    self.face:SetPoint("LEFT", 5, 0)
     if self.SetBackdropColor then self:SetBackdropColor(0.25, 0, 0, 0.9) end
   end)
   button.status = button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-  button.status:SetPoint("TOP", button, "BOTTOM", 0, -3)
+  button.status:SetPoint("TOP", button, "BOTTOM", 0, -4)
   local close =ns.newFrame("Rare", "Button", nil, button, "UIPanelCloseButton")
-  close:SetSize(22, 22)
-  close:SetPoint("RIGHT", -2, 0)
+  close:SetSize(24, 24)
+  close:SetPoint("RIGHT", -8, 0)
   close:SetScript("OnClick", function() R.hideButton() end)
   -- the wheel toggle: on (lit, green) the mouse wheel targets too; again to go back to clicks only
   wheelToggle = ns.newFrame("Rare", "Button", nil, button, "UIPanelButtonTemplate")
-  wheelToggle:SetSize(50, 20)
-  wheelToggle:SetPoint("RIGHT", close, "LEFT", -2, 0)
+  wheelToggle:SetSize(54, 24)
+  wheelToggle:SetPoint("RIGHT", close, "LEFT", -6, 0)
   wheelToggle:SetText("Wheel")
   wheelToggle:SetScript("OnClick", function()
     AuDHDDB.rareWheel = not AuDHDDB.rareWheel or nil
@@ -328,8 +345,34 @@ function R.applyButton()
   b:SetAttribute("macrotext", "/tar " .. e.name)
   wheel:SetAttribute("macrotext", "/tar " .. e.name)
   b.text:SetText(("Target %s%s"):format(e.name, #list > 1 and ("  |cffaaaaaa(%d/%d)|r"):format(idx, #list) or ""))
+  R.showFace(b, e.npc)
   b:Show()
   R.applyWheel()
+end
+-- the rare's model in the face frame; the skull until it has loaded, and for good if it doesn't
+function R.showFace(b, npc)
+  if b.faceNpc == npc then return end
+  b.faceNpc = npc
+  b.model:Hide()
+  b.icon:Show()
+  if not npc then return end
+  pcall(b.model.ClearModel, b.model)
+  if not pcall(b.model.SetCreature, b.model, npc) then return end
+  local tries = 0
+  local function check()
+    if b.faceNpc ~= npc then return end
+    local ok, file = pcall(b.model.GetModelFileID, b.model)
+    if ok and file and not isSecret(file) and file ~= 0 then
+      pcall(b.model.SetPortraitZoom, b.model, 1)
+      b.model:Show()
+      b.icon:Hide()
+    elseif tries < 10 then
+      tries = tries + 1
+      pcall(b.model.SetCreature, b.model, npc)
+      C_Timer.After(0.3, check)
+    end
+  end
+  C_Timer.After(0.1, check)
 end
 function R.showButton(name, npc)
   if not name then return end

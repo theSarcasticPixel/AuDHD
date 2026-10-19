@@ -58,6 +58,10 @@ local function helpful(id)
   if C_Spell and C_Spell.IsSpellHelpful then return C_Spell.IsSpellHelpful(id) end
   if IsHelpfulSpell then local n = spellInfo(id) return n and IsHelpfulSpell(n) end
 end
+local function harmful(id)
+  if C_Spell and C_Spell.IsSpellHarmful then return C_Spell.IsSpellHarmful(id) end
+  if IsHarmfulSpell then local n = spellInfo(id) return n and IsHarmfulSpell(n) end
+end
 -- "Healing Wave (Rank 3)"
 function H.label(bind)
   if not bind then return nil end
@@ -65,8 +69,8 @@ function H.label(bind)
 end
 
 -- your spellbook's spells, every rank it lists: the ones you can cast on someone else, or all of them when the game
--- can't say which those are
-function H.bookSpells()
+-- can't say which those are; with `everything`, your other spells after them (enemy = true)
+function H.bookSpells(everything)
   local all, seen = {}, {}
   local function add(id, name, rank, passive)
     if not id or not name or passive or seen[id] then return end
@@ -96,11 +100,18 @@ function H.bookSpells()
       end
     end
   end
-  local out = {}
-  for _, s in ipairs(all) do if helpful(s.id) then out[#out + 1] = s end end
-  if #out == 0 then out = all end
+  local out, rest = {}, {}
+  for _, s in ipairs(all) do if helpful(s.id) then out[#out + 1] = s else s.enemy = true rest[#rest + 1] = s end end
+  if #out == 0 then out, rest = all, {} end
   local function rankN(s) return tonumber(s.rank and s.rank:match("%d+")) or 0 end
-  table.sort(out, function(a, b) if a.name ~= b.name then return a.name < b.name end return rankN(a) > rankN(b) end)
+  local function byName(a, b) if a.name ~= b.name then return a.name < b.name end return rankN(a) > rankN(b) end
+  table.sort(out, byName)
+  -- everything: the rest after them, marked (Purge, the user 2026-10-18: "click casting cant select purge"; the game
+  -- says who it works on when you click)
+  if everything then
+    table.sort(rest, byName)
+    for _, s in ipairs(rest) do out[#out + 1] = s end
+  end
   return out
 end
 
@@ -112,7 +123,9 @@ function H.plan()
   for i, mb in ipairs(BUTTONS) do
     for _, m in ipairs(MODS) do
       local bind = d.binds[m[1] .. mb[1]]
-      if bind then out[m[3] .. i] = { "spell", bind.id }
+      -- a damaging spell goes to whoever they're targeting (the user, 2026-10-18: "damaging spells ... to the target of
+      -- the target you press"): click the tank's box, hit what the tank is hitting
+      if bind then out[m[3] .. i] = { "spell", bind.id, harmful(bind.id) and "target" or nil }
       elseif m[1] == "" and i == 1 then out[m[3] .. i] = { "target" }
       else out[m[3] .. i] = {} end
     end
@@ -133,6 +146,7 @@ local function applyBinds()
       local prefix, i = key:match("^(.-)(%d)$")
       b:SetAttribute(prefix .. "type" .. i, p[1])
       b:SetAttribute(prefix .. "spell" .. i, p[2])
+      b:SetAttribute(prefix .. "unit" .. i, p[3] and (b.unit .. p[3]) or nil)
     end
   end
 end
@@ -238,6 +252,27 @@ local function showAuras(b)
   end
 end
 
+-- heals on their way to b's unit (UnitGetIncomingHeals: secret in a group, so handed to the bars and text as they are).
+-- The "+N" is your own heal, shown while you cast one
+local casting = false
+local function incoming(b, max)
+  if not (b.incAll and UnitGetIncomingHeals) then return end
+  local u = b.unit
+  local okA, all = pcall(UnitGetIncomingHeals, u)
+  local okM, mine = pcall(UnitGetIncomingHeals, u, "player")
+  for _, p in ipairs({ b.incAll, b.incMine }) do p:SetMinMaxValues(0, max or 1) end
+  b.incAll:SetValue(okA and all or 0)
+  b.incMine:SetValue(okM and mine or 0)
+  -- the tick only with a heal on its way: with none it sat at the end of their health, a white line on everyone (the
+  -- user, 2026-10-18). A secret amount can't be tested: then only while you cast
+  local function on(ok, v) return ok and v ~= nil and (isSecret(v) and casting or not isSecret(v) and v > 0) or false end
+  b.incAll.tick:SetShown(on(okA, all))
+  b.incMine.tick:SetShown(on(okM, mine))
+  local show = casting and okM and mine ~= nil and (isSecret(mine) or mine > 0)
+  if show then show = pcall(b.inc.SetFormattedText, b.inc, "+%d", mine) end
+  if not show then b.inc:SetText("") end
+end
+
 local function update(b)
   local u = b.unit
   if not UnitExists(u) then return end
@@ -256,6 +291,7 @@ local function update(b)
   elseif yes(UnitIsDeadOrGhost) then text = "Dead"
   elseif not isSecret(hp) and not isSecret(max) and hp and max and max > 0 and hp < max then text = "-" .. (max - hp) end
   b.hp:SetText(text)
+  incoming(b, max)
   -- out of your range (party members only): faded. The answer is secret here (testing it flooded errors, the user
   -- 2026-10-18), so the game applies it: SetAlphaFromBoolean takes a secret as it is.
   local alpha = 1
@@ -276,7 +312,7 @@ function H.refresh() for _, b in ipairs(units) do update(b) end end
 -- The buff row above each bar. This client keeps buffs secret (in combat, and at other times) and then won't list them to
 -- an addon at all ("Auras cannot be accessed when secret while tainted": they showed, then went: the user, 2026-10-18).
 -- So the game's own aura container shows them: we say whose and how they look, the game fills it, secret or not (as
--- healer frames such as Aptechka do). Yours (HELPFUL|PLAYER: your heals over time, your buffs) along the bottom of the
+-- healer frames such as Aptechka do). Yours (your spells, cast by you: heals over time, buffs) along the bottom of the
 -- bar, the rest above it. Its icons are the game's to update: once made we never touch them (the game forbids it while auras are secret).
 -- A client without the container: icons we fill ourselves, and only while buffs aren't secret.
 local function auraIcon(button, size)
@@ -295,8 +331,30 @@ local function auraIcon(button, size)
   button:SetApplicationCount(count)
   if button.SetHideTooltipInCombat then button:SetHideTooltipInCombat(true) end
 end
--- one of the game's aura containers on bar b: `filter` auras, laid out left to right from `point`
-local function auraContainer(b, filter, size, init, parent, point, rel, x, y)
+-- your buffs and heals over time: every spell (all ranks) in your spellbook you can cast on someone. The two rows split
+-- on these spell ids, not only on who cast it: the game's PLAYER / !PLAYER filter alone let everyone's buffs into both
+-- rows on your party (the user, 2026-10-18: "buffs are showing on the bottom ... only Heal over time's and my own buffs
+-- should be showing on the bottom")
+local function mineFilters()
+  local ids = {}
+  for _, s in ipairs(H.bookSpells()) do ids[s.id] = true end
+  return { includeSpellIDs = ids }, { excludeSpellIDs = next(ids) and ids or nil }
+end
+-- after you learn a spell (out of combat: the containers can't change in it)
+function H.auraFilters()
+  if InCombatLockdown() then pending.filters = true return end
+  pending.filters = nil
+  local mine, others = mineFilters()
+  for _, b in ipairs(units) do
+    if b.hots and b.hots.SetAuraGroupCandidateFilters then pcall(b.hots.SetAuraGroupCandidateFilters, b.hots, "auras", mine) end
+    if b.container and b.container.SetAuraGroupCandidateFilters then
+      pcall(b.container.SetAuraGroupCandidateFilters, b.container, "auras", others)
+    end
+  end
+end
+-- one of the game's aura containers on bar b: `filter` auras (and only those `cand` allows), laid out left to right
+-- from `point`
+local function auraContainer(b, filter, size, init, parent, point, rel, x, y, cand)
   local c = CreateFrame("AuraContainer", nil, parent, "CustomAuraContainerTemplate")
   if not (c and c.AddAuraGroup and c.SetUnit) then return nil end
   c:SetSize(W, size)
@@ -308,7 +366,7 @@ local function auraContainer(b, filter, size, init, parent, point, rel, x, y)
   end
   if c.SetFlowLayoutMaximumLineSize then c:SetFlowLayoutMaximumLineSize(W) end
   local layout = { elementSpacing = 2, lineSpacing = 2, elementWidth = size, elementHeight = size }
-  c:AddAuraGroup("auras", filter, { maxFrameCount = AURAS, initializeFrame = init, layout = layout })
+  c:AddAuraGroup("auras", filter, { maxFrameCount = AURAS, initializeFrame = init, layout = layout, candidateFilters = cand })
   c:SetUnit(b.unit)
   if c.SetEnabled then c:SetEnabled(true) end
   return c
@@ -320,14 +378,15 @@ local function makeAuraRow(b)
     end
     -- not in our frame registry: the performance probe wraps its frames' scripts, and these are the game's
     -- everyone else's buffs: a row above the bar
-    local c = auraContainer(b, "HELPFUL|!PLAYER", AS, function(button) auraIcon(button, AS) end, b, "BOTTOMLEFT", "TOPLEFT", 1, 2)
+    local mineF, othersF = mineFilters()
+    local c = auraContainer(b, "HELPFUL", AS, function(button) auraIcon(button, AS) end, b, "BOTTOMLEFT", "TOPLEFT", 1, 2, othersF)
     if not c then return nil end
     -- yours (your heals over time): inside the bar along its bottom (the user, 2026-10-18: "put the HoTs on the bottom
     -- of the name plate"). They sit on the bar, so a click on one goes through to the bar and casts as usual.
     local mine = auraContainer(b, "HELPFUL|PLAYER", HOT, function(button)
       auraIcon(button, HOT)
       if button.SetMouseClickEnabled then button:SetMouseClickEnabled(false) else button:EnableMouse(false) end
-    end, b.bar, "BOTTOMLEFT", "BOTTOMLEFT", 3, 3)
+    end, b.bar, "BOTTOMLEFT", "BOTTOMLEFT", 3, 3, mineF)
     if mine and mine.SetFrameLevel then mine:SetFrameLevel(b.bar:GetFrameLevel() + 2) end
     b.hots = mine
     return c
@@ -369,11 +428,44 @@ local function makeUnit(i, unit)
   b.bar:SetPoint("BOTTOMRIGHT", -2, 2)
   b.bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
   b.bar:SetMinMaxValues(0, 1)
-  b.name = b.bar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  if b.bar.SetClipsChildren then pcall(b.bar.SetClipsChildren, b.bar, true) end   -- a heal past full stops at the edge
+  -- the heal on its way (the user, 2026-10-18: "how much a heal is going to heal while you're casting"): a pale bar
+  -- from where health ends, as long as the heal, with a bright tick where it will reach, and "+N" on the right. The
+  -- game's numbers are secret in a group: a status bar and a font string take them as they are, nothing adds them up
+  -- (as HealForever does). Everyone's heals pale, yours brighter over them.
+  local function predict(level, r, g, bl, a)
+    local p = CreateFrame("StatusBar", nil, b.bar)
+    p:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+    p:SetStatusBarColor(r, g, bl, a)
+    p:SetPoint("TOPLEFT", b.bar:GetStatusBarTexture(), "TOPRIGHT")
+    p:SetPoint("BOTTOMLEFT", b.bar:GetStatusBarTexture(), "BOTTOMRIGHT")
+    p:SetWidth(W - 4)
+    p:SetMinMaxValues(0, 1)
+    p:SetValue(0)
+    p:SetFrameLevel(b.bar:GetFrameLevel() + level)
+    local tick = p:CreateTexture(nil, "OVERLAY")
+    tick:SetColorTexture(0.85, 1, 0.88, 0.85)
+    tick:SetWidth(1)
+    tick:SetPoint("TOPRIGHT", p:GetStatusBarTexture(), "TOPRIGHT")
+    tick:SetPoint("BOTTOMRIGHT", p:GetStatusBarTexture(), "BOTTOMRIGHT")
+    tick:Hide()
+    p.tick = tick
+    return p
+  end
+  b.incAll = predict(1, 0.55, 0.68, 0.58, 0.32)
+  b.incMine = predict(2, 0.72, 0.92, 0.78, 0.45)
+  -- the words over the bars
+  b.words = CreateFrame("Frame", nil, b.bar)
+  b.words:SetAllPoints()
+  b.words:SetFrameLevel(b.bar:GetFrameLevel() + 4)
+  b.inc = b.words:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  b.inc:SetPoint("RIGHT", -4, 1)
+  b.inc:SetTextColor(0.5, 1, 0.55)
+  b.name = b.words:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   b.name:SetPoint("TOP", 0, -4)
   b.name:SetWidth(W - 10)
   b.name:SetWordWrap(false)
-  b.hp = b.bar:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  b.hp = b.words:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   b.hp:SetPoint("CENTER", 0, 1)   -- the bottom is for your heals over time
   b:SetHighlightTexture("Interface\\Buttons\\WHITE8X8", "ADD")
   local hl = b:GetHighlightTexture()
@@ -474,7 +566,7 @@ local function pickList(row)
         if s then
           local _, icon = spellInfo(s.id)
           r.icon:SetTexture(icon or 134400)
-          r.text:SetText(H.label(s))
+          r.text:SetText(s.enemy and ("%s |cffaaaaaa(their target)|r"):format(H.label(s)) or H.label(s))
           r:Show()
         else
           r:Hide()
@@ -484,7 +576,7 @@ local function pickList(row)
     if UISpecialFrames then table.insert(UISpecialFrames, "AuDHDHealList") end
   end
   list.button = row.button
-  list.spells = H.bookSpells()
+  list.spells = H.bookSpells(true)
   list.top = 0
   list:ClearAllPoints()
   list:SetPoint("TOPLEFT", row.slot, "BOTTOMLEFT", 0, -2)
@@ -655,7 +747,9 @@ end
 
 local frame = ns.newFrame("Heal", "Frame")
 for _, e in ipairs({ "PLAYER_LOGIN", "PLAYER_ENTERING_WORLD", "GROUP_ROSTER_UPDATE", "PLAYER_REGEN_ENABLED", "UNIT_HEALTH",
-                     "UNIT_MAXHEALTH", "UNIT_AURA", "UNIT_CONNECTION", "UNIT_NAME_UPDATE", "DISPLAY_SIZE_CHANGED", "UI_SCALE_CHANGED" }) do
+                     "UNIT_MAXHEALTH", "UNIT_AURA", "UNIT_CONNECTION", "UNIT_NAME_UPDATE", "DISPLAY_SIZE_CHANGED", "UI_SCALE_CHANGED",
+                     "SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB", "UNIT_HEAL_PREDICTION",
+                     "UNIT_SPELLCAST_START", "UNIT_SPELLCAST_STOP", "UNIT_SPELLCAST_FAILED", "UNIT_SPELLCAST_INTERRUPTED" }) do
   pcall(frame.RegisterEvent, frame, e)
 end
 frame:SetScript("OnEvent", function(_, e, unit)
@@ -666,6 +760,11 @@ frame:SetScript("OnEvent", function(_, e, unit)
     if pending.binds then applyBinds() end
     if pending.place then place() end
     if pending.layout then H.layout() end
+    if pending.filters then H.auraFilters() end
+  elseif e:find("^UNIT_SPELLCAST") then
+    if unit == "player" then casting = e == "UNIT_SPELLCAST_START" H.refresh() end
+  elseif e == "SPELLS_CHANGED" or e == "LEARNED_SPELL_IN_TAB" then
+    H.auraFilters()
   elseif e == "GROUP_ROSTER_UPDATE" or e == "PLAYER_ENTERING_WORLD" then
     H.layout()
     for _, b in ipairs(units) do for _, c in ipairs({ b.container, b.hots }) do if c.UpdateAllAuras then pcall(c.UpdateAllAuras, c) end end end

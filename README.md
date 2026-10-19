@@ -59,6 +59,8 @@ Hold **Shift** while talking to an NPC to pause all of these.
   cast on them:
   - Pick a spell and rank for each mouse button, and for Shift + click and Ctrl + click too. Choose from your spellbook
     or drag a spell in. Right-click a slot to clear it. Spells are saved per character.
+  - Damaging spells work too: they go to whoever that person is targeting. Click the tank to hit the tank's target.
+  - While you cast a heal, the bar shows how far it will fill them and how much it heals ("+340").
   - Your own heals over time and buffs show along the bottom of each bar, with a timer sweep, so you can see who still
     has your Rejuvenation or Renew. Everyone else's buffs show in a row above the bar.
   - Bars show health missing, Dead or Offline, and fade when someone is out of range.
@@ -84,7 +86,8 @@ Hold **Shift** while talking to an NPC to pause all of these.
 - **Walking paths, not straight lines.** Routes go around cliffs, trees, water and buildings, using a path map of each
   zone. Caves and mines lead you to the entrance first.
 - **Blocked?** `/audhd blocked` tells it the way ahead is closed and it finds another; `/audhd unblock` resets that.
-- **Flight paths.** Passing a flight master you don't have yet? It sends you to learn it first. Long trips use flights
+- **Flight paths.** Passing a flight master you don't have yet? It sends you to learn it first (talking to them is
+  enough). Long trips use flights
   you know, and the Deeprun Tram between Ironforge and Stormwind when that's quicker.
 - **Map pins.** The route's next steps are numbered on your world map and minimap.
 - **Your own waypoint.** `/way 42 54` (or `/way <zone> 42 54`) points the arrow anywhere.
@@ -93,7 +96,8 @@ Hold **Shift** while talking to an NPC to pause all of these.
 
 - **Range guide** on the enemy's nameplate: too close, in range, too far. Useful for hunters and casters.
 - **Threat** on nameplates, so you can see what's about to turn on you.
-- **Rare alerts.** A pop-up and a `/tar` button near any rare's spawn point, louder when a quest of yours needs it.
+- **Rare alerts.** A pop-up and a `/tar` button (with the rare's face) near any rare's spawn point, louder when a quest
+  of yours needs it.
   Choose all rares, only the route's rares, or none. Optionally, the mouse wheel cycles through nearby rares.
 - **Drop chances on mob tooltips.** Hover a mob to see what quest items it drops, the known (or estimated) chance, and
   how lucky you've been so far: `Dewy Lasher Frond 25% · you 2/9 (22%)`.

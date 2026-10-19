@@ -124,7 +124,7 @@ function W.update()
   local d, turn = ns.core.bearing(w)
   if not d then
     tex:Hide()
-    distText:SetText("|cffaaaaaaanother zone or continent|r")
+    distText:SetText(("|cffaaaaaain %s|r"):format(mapName(w.m)))
     return
   end
   tex:Show()

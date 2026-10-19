@@ -452,6 +452,30 @@ end
 
 function W.resetPaths() cache, cacheN = {}, 0; W.newPaths() end
 -- the flight map is open: the flight paths it shows you know (by the game's node id where it says, else by name)
+-- a flight path learned by talking to its flight master: on Forever they open a chat window first, and you have the
+-- path from then on, flight map opened or not (the user, 2026-10-18: Stormwind's "didn't update to being learned until
+-- i clicked the travel part"). The one you don't know yet within 40 yd of you; its id, or nil
+function W.learnHere()
+  local m = C_Map.GetBestMapForUnit("player")
+  local p = m and C_Map.GetPlayerMapPosition(m, "player")
+  if not p then return nil end
+  local px, py = p:GetXY()
+  if not px or (issecretvalue and issecretvalue(px)) then return nil end
+  local c, X, Y = W.toWorld(m, px * 100, py * 100)
+  local K, best, bd = W.knownTaxis(), nil, 40
+  for _, d in pairs(ns.walkData or {}) do
+    for _, t in ipairs(d.taxis or {}) do
+      if not K[t.id] and t.m then
+        local tc, tX, tY = W.toWorld(t.m, t.x, t.y)
+        local dd = tc == c and X and tX and math.sqrt((tX - X) ^ 2 + (tY - Y) ^ 2)
+        if dd and dd < bd then best, bd = t.id, dd end
+      end
+    end
+  end
+  if best then K[best] = true; W.resetPaths() end
+  return best
+end
+
 function W.readTaxiMap()
   local K, added, changed = W.knownTaxis(), {}, false
   -- every flight master the map draws says whether you know it: unknown ones it draws too, greyed (the user,

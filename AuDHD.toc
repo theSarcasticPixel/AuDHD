@@ -2,7 +2,7 @@
 ## Title: AuDHD
 ## Notes: Remembers the small stuff: buff and ammo reminders, easy group buffs and healing, and what to do next. /audhd settings
 ## Author: theSarcasticPixel
-## Version: 0.2.3
+## Version: 0.2.4
 ## SavedVariables: AuDHDDB, AuDHDLog
 
 Route_nelf_hunter_start.lua
