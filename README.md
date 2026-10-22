@@ -102,13 +102,39 @@ Hold **Shift** while talking to an NPC to pause all of these.
 - **Drop chances on mob tooltips.** Hover a mob to see what quest items it drops, the known (or estimated) chance, and
   how lucky you've been so far: `Dewy Lasher Frond 25% · you 2/9 (22%)`.
 
+## Fishing
+
+- **One-click fishing.** With a fishing pole in your hands, one click of a mouse button you choose (right, middle,
+  button 4 or 5) casts, and the same click reels in when the bobber splashes. Holding the button still turns the camera
+  as usual.
+- **Lures for you.** No lure on your pole? The click puts the best one from your bags on first.
+- **A louder splash.** While a pole is equipped the splash is turned up and the music and ambience down, so the bite
+  is easy to hear. Set the volume in the settings. Everything goes back when you take the pole off.
+- **Fishing level of the zone**, under the minimap while you hold a pole and on the world map, coloured like quest
+  difficulty: red is too high even with your lures, orange needs a lure you have, yellow is about your skill, green
+  gives fewer skill-ups and grey none.
+
+## Detailed map
+
+A big map of the whole open world, both continents side by side, drawn from the game's own pictures.
+
+- **Zoom all the way.** Zoomed out it's the game's painted continent map; zoom in with the mouse wheel and it blends
+  into the detailed minimap pictures, down to single buildings. Ironforge, Undercity, Stormwind and Orgrimmar fade in
+  from their city maps.
+- **You and your route on it.** Your arrow, the walking path to your step, and the next steps as numbered dots.
+- **Drag to move around**, or **Center on me** to follow you again.
+- Open it with `/audhd bigmap` or a key (Key Bindings → AuDHD → Detailed map). It can also take over your world map key,
+  with a button to the game's own map. Off until you switch it on in the settings.
+
 ## Settings
 
-`/audhd settings`, a right-click on the minimap button, or **Options → AddOns → AuDHD**.
+`/audhd settings`, a right-click on the minimap button, or **Options → AddOns → AuDHD**. The settings are in tabs:
+Windows, Automation, Reminders, Rares, Party, Fishing and Warlock.
 
 Every part of the addon can be switched on or off: the route window, arrow, range guide, minimap button, map pins,
 threat, each automation, rare alerts, imbue and buff buttons, sell and train reminders, the quest item button, quest
-complete messages, drop chances, party progress, click-cast healing and the soul shard counter.
+complete messages, drop chances, party progress, click-cast healing, the soul shard counter, each fishing helper and
+the detailed map.
 
 ## Commands
 
@@ -136,6 +162,11 @@ complete messages, drop chances, party progress, click-cast healing and the soul
 | `/audhd announce party off\|on` | Whether they also go to party chat |
 | `/audhd heal [on\|off\|setup]` | Click-cast healing frames, or pick their spells |
 | `/audhd shards [on\|off\|max <n>\|low <n>\|lock\|unlock\|reset]` | Soul shard counter |
+| `/audhd fish [on\|off\|right\|middle\|4\|5]` | One-click fishing, and which mouse button |
+| `/audhd fish loud on\|off` · `volume <10-100>` | The louder splash, and its volume |
+| `/audhd fish lure on\|off` · `zone on\|off` · `map on\|off` | Lures, the zone's fishing level under the minimap, on the world map |
+| `/audhd fish status` | What one-click fishing sees right now |
+| `/audhd bigmap [on\|off\|replace on\|off]` | Open the detailed map, switch it on or off, or let it take the world map key |
 | `/audhd minimap on\|off` | Minimap button |
 | `/audhd blocked` · `unblock` | Route around a blocked path, or reset |
 | `/audhd perf` | Measure the addon's frame time (for lag reports) |
@@ -162,7 +193,8 @@ The log contains your character's name and route progress, nothing else.
 ## Credits
 
 Quest and map data based in part on [Questie](https://github.com/Questie/Questie) and the
-[ForeverDB](https://foreverdb.net) community, with many corrections from in-game testing.
+[ForeverDB](https://foreverdb.net) community, with many corrections from in-game testing. The detailed map finds the
+game's minimap pictures by the community file list ([wow-listfile](https://github.com/wowdev/wow-listfile)).
 
 ## License
 

@@ -54,7 +54,9 @@ function P.describe(r)
 end
 
 -- the name without its level range (the time line says where it goes)
-local function name(r) return ((r.title or "?"):gsub(":%s*level %d+ to %d+$", "")) end
+-- (a Hunter route in two styles says which: pet first, or the fastest overall)
+local STYLE = { pet = " (pet first)", fast = " (fastest)" }
+local function name(r) return ((r.title or "?"):gsub(":%s*level %d+ to %d+$", "")) .. (STYLE[r.style] or "") end
 
 local function create()
   frame = ns.newFrame("RoutePicker", "Frame", "AuDHDRoutePicker", UIParent, "BackdropTemplate")

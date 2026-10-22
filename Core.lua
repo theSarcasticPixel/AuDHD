@@ -613,6 +613,10 @@ end
 -- there comes first: a pick-up whose quest you can take, a hand-in of a finished quest (also one the route doesn't
 -- plan, e.g. one you took on your own), or the objectives of a quest you have that you're standing among.
 local NEAR, NEAR_DO, DETOUR, STICK = 250, 90, 120, 40   -- yards
+-- the route's step a hearth: work this far from you is done first when coming back for it later is the longer walk
+-- (the user, 2026-10-22: told to hearth with Mist and the spinnerets right there in the north-west, "the route should
+-- be able to tell it's better to go and get it and kill things on the way than it is to just miss it or run back")
+local HEARTH_REACH = 600
 local WORK_KEEP = 150   -- yards: this near a kill / collect step's spawns, you stay on it
 local function playerWorld()
   local m = C_Map.GetBestMapForUnit("player")
@@ -865,6 +869,25 @@ function C.caveTick()
 end
 C.roamState = roam   -- the smoke test
 
+-- quests the route has work for (its "do" steps, and the log quests it plans work for)
+local workOf = setmetatable({}, { __mode = "k" })
+local function routeWork(q)
+  local r = C.route()
+  if not r then return false end
+  local w = workOf[r]
+  if not w then
+    w = {}
+    for _, s in ipairs(r.steps) do
+      if s.k == "do" then
+        if s.q then w[s.q] = true end
+        for _, m in ipairs(s.mem or {}) do if m.q then w[m.q] = true end end
+      end
+    end
+    for id, o in pairs(r.objs or {}) do if o.mem and #o.mem > 0 then w[id] = true end end
+    workOf[r] = w
+  end
+  return w[q] or false
+end
 local function readyToHandIn(q)
   if not inLog(q) then return false end
   if C_QuestLog.ReadyForTurnIn and C_QuestLog.ReadyForTurnIn(q) then return true end
@@ -872,7 +895,11 @@ local function readyToHandIn(q)
   -- every objective finished, a "Tame a ..." counting when that beast is your pet (Forever flags neither the objective
   -- nor the quest as done after a Taming Rod)
   local ok, objs = pcall(C_QuestLog.GetQuestObjectives, q)
-  if not ok or type(objs) ~= "table" or #objs == 0 then return false end
+  if not ok or type(objs) ~= "table" then return false end
+  -- no objectives: a "go and talk to" quest (Training the Beast, to Jocaste in Darnassus: Forever calls it neither ready
+  -- nor complete, so the hand-in was never offered, the user 2026-10-22); not one the route has work for (its objectives
+  -- not loaded yet)
+  if #objs == 0 then return not routeWork(q) end
   for _, o in ipairs(objs) do
     local text = o.text
     if not o.finished then
@@ -882,6 +909,32 @@ local function readyToHandIn(q)
   return true
 end
 -- can you do this step right now?
+-- a quest's work isn't offered while its mobs are more than a level above you (mlv): Twisted Hatred, taken at 9 by
+-- auto-accept, sent you to level 11 spiders "on the way" (the user, 2026-10-22: "not optimal"). When the planned level
+-- is all there is (lv; no mob level known), only work planned 4+ levels above you waits. Not the planned level alone:
+-- Mist, Darkness in the Glade and the Spinnerets (level 12) were held at 11 for being planned at 13, and you were sent
+-- to hearth away from them (the user, 2026-10-22)
+local function tooEarly(s)
+  if s.k ~= "do" then return false end
+  local L = UnitLevel("player") or 0
+  if s.mlv then return s.mlv > L + 1 end
+  return (s.lv and s.lv >= L + 4) or false
+end
+-- a quest whose route pick-up has a hold rule (hold: one set by hand, not a real prerequisite) still open: its work
+-- waits too when you already have it (The Relics of Wakening, auto-accepted at 8, waits for Training the Beast; the user
+-- 2026-10-22)
+local holdCache = setmetatable({}, { __mode = "k" })
+local function heldQuest(q)
+  local r = C.route()
+  local h = r and holdCache[r]
+  if r and not h then
+    h = {}
+    for _, x in ipairs(r.steps or {}) do if x.k == "accept" and x.q and x.hold then h[x.q] = x.hold end end
+    holdCache[r] = h
+  end
+  for _, p in ipairs(h and h[q] or {}) do if not completed(p) then return true end end
+  return false
+end
 local function doable(s)
   local q = s.q
   if s.k == "accept" then
@@ -898,7 +951,7 @@ local function doable(s)
   if s.k == "turnin" then return q and readyToHandIn(q) or false end
   if s.k == "do" then
     for _, m in ipairs(s.mem or { { q = q, on = s.on } }) do
-      if m.q and inLog(m.q) and not completed(m.q) and not objectiveDone(m) then return true end
+      if m.q and inLog(m.q) and not completed(m.q) and not objectiveDone(m) and not heldQuest(m.q) then return true end
     end
     return false
   end
@@ -912,7 +965,7 @@ local function placeFor(s, P, aim)
     local best, bd
     local direct = aim and aim.c == P.c and dist(P, aim)
     for _, m in ipairs(s.mem) do
-      if m.q and inLog(m.q) and not objectiveDone(m) then
+      if m.q and inLog(m.q) and not objectiveDone(m) and not heldQuest(m.q) then
         for _, w in ipairs(landSpots(spawnSpots(m))) do
           if w.c == P.c and not (direct and isSeen(w)) then
             local d = dist(P, w)
@@ -1059,6 +1112,125 @@ function C.flightToLearn(P, R)
   end
   return best
 end
+-- ------------------------------------------------------------------ level 10 pet, a Hunter in Teldrassil
+-- at 95 % of level 9, away from Dolanaar: die and come back at its spirit healer (no resurrection sickness before 10),
+-- kill a few mobs round the village for the rest, and Dazalar's pet quests start at once; the route carries on from
+-- where you were after (the user, 2026-10-22). Hearth instead when it's ready and takes you there; walk when Dolanaar
+-- isn't the graveyard you'd come back at (you'd be put back in Darnassus or at Aldrassil: the user died at 42.8,38 and
+-- came back in Darnassus, and the pop-up had said nothing)
+local PET10 = {
+  near = 600,                                 -- yards from Dazalar: closer than this you just walk
+  dazalar = { m = 1438, x = 56.7, y = 59.5 },
+  healer = { m = 1438, x = 56.3, y = 62.8 },  -- the Dolanaar spirit healer
+  graves = { { m = 1438, x = 56.3, y = 62.8, dol = true }, { m = 1438, x = 33.3, y = 52.4, n = "Darnassus" },
+             { m = 1438, x = 59.0, y = 42.6, n = "Aldrassil" }, { m = 1438, x = 56.0, y = 92.1, n = "Rut'theran Village" } },
+}
+local function petStarted()
+  for q in pairs(petQuests(C.route()) or {}) do if inLog(q) or completed(q) then return true end end
+  return false
+end
+local function xpShare()
+  local cur, max = UnitXP and UnitXP("player"), UnitXPMax and UnitXPMax("player")
+  if not cur or not max or isSecret(cur) or isSecret(max) or max <= 0 then return nil end
+  return cur / max, max - cur
+end
+-- how to get there from here: "die", "hearth" or "walk" (and the graveyard you'd come back at)
+local function pet10Way(P)
+  local near, nd
+  for _, g in ipairs(PET10.graves) do
+    local w = spot(g)
+    local d = w and w.c == P.c and dist(P, w)
+    if d and (not nd or d < nd) then near, nd = g, d end
+  end
+  if near and near.dol then return "die" end
+  local b = C.bindSpot()
+  if b and b.n == "Dolanaar" and (C.hearthLeft() or 1) == 0 then return "hearth" end
+  return "walk", near and near.n
+end
+local function pet10Due(P)
+  if select(2, UnitClass("player")) ~= "HUNTER" or (UnitLevel("player") or 0) ~= 9 then return nil end
+  if C.route().style == "fast" then return nil end   -- you chose the fastest route: no detour for the pet
+  if petStarted() then return nil end
+  local share = xpShare()
+  if not share or share < 0.95 or not P then return nil end
+  local m = C_Map.GetBestMapForUnit("player")
+  if m ~= 1438 then return nil end
+  local dz = spot(PET10.dazalar)
+  if not dz or dz.c ~= P.c or dist(P, dz) <= PET10.near then return nil end
+  return pet10Way(P)
+end
+StaticPopupDialogs["AUDHD_PET10"] = {
+  text = "%s",
+  button1 = "OK",
+  button2 = "Not now",
+  OnAccept = function(_, data) rdb().pet10 = data.way; log("PET10", { way = data.way, go = true }); C.repick(true, "pet10") end,
+  OnCancel = function(_, data, reason) if reason == "clicked" then rdb().pet10 = "no"; log("PET10", { way = data.way, go = false }) end end,
+  timeout = 0, whileDead = true, hideOnEscape = false, preferredIndex = 3,
+}
+-- on XP gains: once per character
+function C.pet10Check()
+  local st = rdb()
+  if st.pet10 then return end
+  local way, grave = pet10Due(playerWorld())
+  if not way then return end
+  local _, left = xpShare()
+  st.pet10 = "asked"
+  local how = way == "hearth" and "Hearth to Dolanaar" or way == "walk" and
+    ("Head to Dolanaar now (don't die on the way: you'd come back at %s, not Dolanaar)"):format(grave or "another graveyard") or
+    "Die and come back at the Dolanaar spirit healer (no resurrection sickness before level 10)"
+  local dlg = StaticPopup_Show("AUDHD_PET10", ("You're almost level 10 (%d XP to go). %s, kill a few mobs round the " ..
+    "village for the rest, then see Dazalar for your pet quests. The route brings you back here after."):format(left or 0, how))
+  if dlg then dlg.data = { way = way } else st.pet10 = nil end
+  log("PET10_ASK", { way = way, left = left })
+end
+-- the step while you're on your way: the spirit healer (dead or on the way to dying), the hearth, then mobs round
+-- Dolanaar (the route's own kill spots within PET10.near of Dazalar, none above you) until 10
+local pet10Steps = {}
+function C.pet10Step(P)
+  local st = rdb()
+  if (st.pet10 ~= "die" and st.pet10 ~= "hearth" and st.pet10 ~= "walk") or (UnitLevel("player") or 0) ~= 9 or petStarted() then return nil end
+  local dz = spot(PET10.dazalar)
+  local away = not (P and dz and dz.c == P.c and dist(P, dz) <= PET10.near)
+  local _, left = xpShare()
+  local s
+  if UnitIsDeadOrGhost and UnitIsDeadOrGhost("player") then
+    s = pet10Steps.ghost or { k = "grind", m = PET10.healer.m, x = PET10.healer.x, y = PET10.healer.y,
+                              t = "Release, then resurrect at the Dolanaar spirit healer" }
+    pet10Steps.ghost = s
+  elseif away and st.pet10 == "walk" then
+    s = pet10Steps.walk or { k = "grind", m = PET10.dazalar.m, x = PET10.dazalar.x, y = PET10.dazalar.y,
+                             t = "Head to Dolanaar for the level 10 pet quests" }
+    pet10Steps.walk = s
+  elseif away then
+    s = pet10Steps.go or { k = "grind", m = PET10.healer.m, x = PET10.healer.x, y = PET10.healer.y, hs = st.pet10 == "hearth" and 1 or nil,
+                           t = st.pet10 == "hearth" and "Hearth to Dolanaar for the level 10 pet quests" or
+                               "Die here, then resurrect at the Dolanaar spirit healer (no sickness before 10)" }
+    pet10Steps.go = s
+  else
+    if not pet10Steps.grind then
+      local best, bd
+      for _, rs in ipairs(C.route().steps) do
+        if rs.k == "do" and (rs.mlv or 0) <= 10 then
+          for _, mm in ipairs(rs.mem or {}) do
+            for _, g in ipairs(mm.sp or {}) do
+              for k = 1, #(g.p or {}) - 1, 2 do
+                local w = spot({ m = g.m, x = g.p[k], y = g.p[k + 1] })
+                local d = w and w.c == dz.c and dist(w, dz)
+                if d and d <= PET10.near and (not bd or d < bd) then best, bd = { m = g.m, x = g.p[k], y = g.p[k + 1] }, d end
+              end
+            end
+          end
+        end
+      end
+      best = best or PET10.dazalar
+      pet10Steps.grind = { k = "grind", m = best.m, x = best.x, y = best.y }
+    end
+    s = pet10Steps.grind
+    s.t = ("Kill mobs round Dolanaar to level 10 (%d XP to go), then Dazalar's pet quests"):format(left or 0)
+  end
+  return { step = s, i = "pet10", via = true }
+end
+
 local function pick()
   local st, o, steps = rdb(), order(), C.route().steps
   -- an escort under way: that's all you can do (follow them; no detours)
@@ -1091,6 +1263,9 @@ local function pick()
   end
   local function leftBehind(p, s)
     if not Pnow then return false end
+    -- the pet quests while they're open: never (Training the Beast's hand-in in Darnassus was passed over, the user
+    -- 2026-10-22: "i still need to hand in at darnassus so i can learn feed pet")
+    if C.petPending and isPetStep(s, petQuests(C.route())) then return false end
     local done = 0
     for q = p + 1, math.min(#o, p + 40) do
       if isDoneAt(q) then done = done + 1 if done >= LEFT_DONE then break end end
@@ -1130,6 +1305,12 @@ local function pick()
     return { step = best, i = waitId(best), via = "escort" }
   end
   if not P then return { step = R, i = Ri } end
+  -- a Hunter's run to Dolanaar for the level 10 pet (you said OK to the pop-up)
+  local pet = C.pet10Step(P)
+  if pet then return pet end
+  -- level 10 and the pet quests open: straight to them, nothing on the way (the user, 2026-10-22: sent to hand in Not
+  -- Dead Yet at Byancie first, "not telling me to go directly to the hunter trainer"); the route comes back for the rest
+  if C.petPending and isPetStep(R, petQuests(C.route())) then return { step = R, i = Ri } end
   -- a flight master you haven't learned, near you or on your way: always there first (the user, 2026-10-17: "when going
   -- near a flight path you dont have it should always direct you there", sent on to Westfall past Stormwind's)
   local fp = C.flightToLearn(P, R)
@@ -1137,7 +1318,11 @@ local function pick()
   -- working a kill / collect step (among its spawns): stay on it until it's done, instead of flipping to another one
   -- nearby (the user, 2026-10-17: Stocking Jetsteam's two steps by turns, "jumping back and forth between two spots")
   local cs = C.cur and C.cur.step
-  if cs and cs.k == "do" and type(C.cur.i) == "number" and not C.isDone(cs, C.cur.i) and doable(cs) then
+  -- not a step you put off with Later (the user, 2026-10-22: clicked it three times among Twisted Hatred's spiders and
+  -- it stayed), nor one too early for your level
+  local curLater = C.cur and st.later and st.later[C.cur.i]
+  if cs and cs.k == "do" and type(C.cur.i) == "number" and not C.isDone(cs, C.cur.i) and doable(cs)
+     and not (curLater and not curLater.away) and not tooEarly(cs) then
     local w = placeFor(cs, P)
     local aim = C.cur.via and C.routeAim
     if aim and C.cur.step ~= R then w = placeFor(cs, P, aim) w = w and onTheWay(w, P, aim) and w end
@@ -1155,9 +1340,11 @@ local function pick()
   -- hearthing there: no way to be on (the user, 2026-10-17, Stonesplinter Scouts in Loch Modan with the route's step a
   -- hearth back to Dun Morogh: sent north to the scouts "on the way" west, not to those all round you to the south)
   if not walking then C.routeAim = nil end
+  local hearthing = not walking and (R.hs or C.hearthNow(R))
   local best, bestScore
   -- allow: more detour that's still worth it (a quest the route doesn't plan: less than coming back for it later)
-  local function consider(s, i, allow)
+  -- from: the step the route comes to it from (hearthing: what coming back for it would cost)
+  local function consider(s, i, allow, from)
     local lt = st.later and st.later[i]
     if lt and not lt.away then return end
     -- a kill / collect step: its spot most on the way (the user, 2026-10-17: "via points that have the thick bear fur")
@@ -1170,6 +1357,14 @@ local function pick()
     local detour = rw and (d + dist(w, rw) - rd) or d
     local limit = math.max(DETOUR, allow or 0)
     local onTheWay = walking and d < rd and detour <= limit
+    if hearthing then
+      -- you hearth from wherever you finish: going there is all it costs, against the route's walk to it later
+      local fw = from and placeFor(from, P)
+      local back = fw and fw.c == w.c and dist(w, fw) or math.huge
+      limit = math.min(HEARTH_REACH, allow or back)
+      detour = d
+      onTheWay = d <= limit
+    end
     if allow and not onTheWay and d > NEAR_DO then return end
     if d > ((s.k == "do") and NEAR_DO or NEAR) * sticky and not onTheWay then return end
     if detour > limit * sticky and d > 40 then return end
@@ -1178,6 +1373,12 @@ local function pick()
     if not bestScore or score < bestScore then best, bestScore = { step = s, i = i, d = d }, score end
   end
   local handedIn = {}
+  -- the route's step before each one: where it comes to it from (a hearth step is where you land)
+  local from
+  for p = st.pos - 1, 1, -1 do
+    local s = steps[o[p]]
+    if s and s.m and s.x then from = s break end
+  end
   for p = st.pos, #o do
     local s, i = steps[o[p]], o[p]
     if s.k == "turnin" and s.q then handedIn[s.q] = true end
@@ -1185,15 +1386,16 @@ local function pick()
     local kinds = C.petPending and s.k == "turnin" or not C.petPending and (s.k == "accept" or s.k == "turnin" or s.k == "do")
     -- a timed quest is taken only in the route's order: its clock starts at the pick-up
     if s.tm and s.k == "accept" then kinds = false end
-    if p ~= rp and s.q and kinds and not C.isDone(s, i) and doable(s) then
+    if p ~= rp and s.q and kinds and not C.isDone(s, i) and doable(s) and not tooEarly(s) then
       local held = C.escortWait(s)
       if held then
         -- an escort nearby that has to wait: what holds it, instead
         for _, w in ipairs(held) do consider(w, waitId(w)) end
       else
-        consider(s, i)
+        consider(s, i, nil, from)
       end
     end
+    if s.m and s.x then from = s end
   end
   -- finished quests in your log the rest of the route doesn't hand in
   local ends = C.route().ends or {}
@@ -1230,7 +1432,10 @@ local function pick()
     local info = C_QuestLog.GetInfo(li)
     local q = info and not info.isHeader and info.questID
     local o = q and objs[q]
-    if o and not handedIn[q] and not readyToHandIn(q) and not rdb().manual["o" .. q] then
+    -- held until its hold rule is met (pa: The Relics of Wakening waits for a Hunter's pet, the user 2026-10-22)
+    local held = false
+    for _, p in ipairs(o and o.pa or {}) do if not completed(p) then held = true end end
+    if o and not held and not handedIn[q] and not readyToHandIn(q) and not rdb().manual["o" .. q] then
       local left = {}
       for _, m in ipairs(o.mem) do if not objectiveDone(m) then left[#left + 1] = m end end
       if #left > 0 then
@@ -1519,6 +1724,10 @@ local events = {
     if ns.ui then C_Timer.After(0.5, ns.ui.refresh) end   -- the live objective counts
   end,
   PLAYER_LEVEL_UP = function() soon("level up") end,
+  PLAYER_XP_UPDATE = function() C.pet10Check() end,
+  PLAYER_DEAD = function() soon("died") end,
+  PLAYER_ALIVE = function() soon("alive") end,
+  PLAYER_UNGHOST = function() soon("resurrected") end,
   BAG_UPDATE_DELAYED = function() ammoCheck(); moneyCheck() end,
   PLAYER_MONEY = function() moneyCheck() end,
   MERCHANT_CLOSED = function()
@@ -1587,7 +1796,8 @@ function C.pickCharRoute()
       local best, bestRank
       for k, r in pairs(ns.routes) do
         if fits(r, race, class, level) then
-          local rank = ((r.start or 1) <= level and 0 or 2e6) + (r.class and 0 or 1e6) + (r.minutes or 1e5)
+          local rank = ((r.start or 1) <= level and 0 or 2e6) + (r.class and 0 or 1e6) + (r.minutes or 1e5) +
+            ((r.style and r.style ~= ((d.charStyle or {})[key] or "pet")) and 5e5 or 0)
           if not bestRank or rank < bestRank or (rank == bestRank and k < best) then best, bestRank = k, rank end
         end
       end
@@ -1597,6 +1807,41 @@ function C.pickCharRoute()
   end
   if mine ~= d.route then log("ROUTE", { route = mine, why = "character" }) end
   d.route = mine
+end
+-- a Hunter's first launch below 10: pet first (level 10 and the pet as soon as possible, the route planned around it)
+-- or the fastest route overall (the user, 2026-10-22). The route has both ("style" pet / fast); the choice is kept per
+-- character and picks between them
+local function styleTwin(r, style)
+  for k, x in pairs(ns.routes) do
+    if x ~= r and x.style == style and x.race == r.race and x.class == r.class and x.start == r.start and x.target == r.target then return k end
+  end
+end
+function C.setStyle(style)
+  local d = AuDHDDB
+  d.charStyle = d.charStyle or {}
+  d.charStyle[charKey()] = style
+  log("STYLE", { style = style })
+  local r = ns.routes[d.route]
+  local twin = r and r.style and r.style ~= style and styleTwin(r, style)
+  if twin then C.setRoute(twin) end
+end
+StaticPopupDialogs["AUDHD_STYLE"] = {
+  text = "How should your levelling be planned?\n\n|cffffffffPet first|r: level 10 and your pet as soon as possible. " ..
+    "The route is built around it, so you hit 10 near your class trainer and hand in what gets you there first.\n\n" ..
+    "|cffffffffFastest|r: the quickest route overall. The pet quests come at 10, wherever you are.\n\n" ..
+    "You can change this later with /wfn style.",
+  button1 = "Pet first",
+  button2 = "Fastest",
+  OnAccept = function() C.setStyle("pet") end,
+  OnCancel = function(_, _, reason) if reason == "clicked" then C.setStyle("fast") end end,
+  timeout = 0, whileDead = true, hideOnEscape = false, preferredIndex = 3,
+}
+function C.askStyle()
+  local d = AuDHDDB
+  local r = ns.routes[d.route]
+  if not (r and r.style) or (d.charStyle or {})[charKey()] or (UnitLevel("player") or 1) >= 10 then return end
+  if not styleTwin(r, r.style == "pet" and "fast" or "pet") then return end
+  StaticPopup_Show("AUDHD_STYLE")
 end
 frame:SetScript("OnEvent", function(_, event, ...)
   if event == "ADDON_LOADED" then
@@ -1627,6 +1872,7 @@ frame:SetScript("OnEvent", function(_, event, ...)
     for e in pairs(events) do pcall(frame.RegisterEvent, frame, e) end
     -- the quest log isn't ready at login: look a moment later
     C_Timer.After(3, function() C.advance("init") end)
+    C_Timer.After(4, C.askStyle)
     -- every 2 s: the GPS looks at where you are now, and objectives that finish without a quest log update (taming
     -- with a Taming Rod) are seen
     C_Timer.NewTicker(2, function() C.advance("gps") end)
@@ -1681,6 +1927,8 @@ SlashCmdList.AUDHD = function(input)
     AuDHDDB.minimap.hide = (rest == "off") or nil
     ns.minimap.apply()
     say("minimap button: " .. (AuDHDDB.minimap.hide and "off" or "on") .. " (/wfn minimap on|off)")
+  elseif cmd == "style" then   -- a Hunter below 10: pet first or the fastest route (/wfn style pet|fast, or ask)
+    if rest == "pet" or rest == "fast" then C.setStyle(rest) else StaticPopup_Show("AUDHD_STYLE") end
   elseif cmd == "route" then
     if ns.routes[rest] then
       C.setRoute(rest)
@@ -1737,6 +1985,11 @@ SlashCmdList.AUDHD = function(input)
     say(ns.imbue.command(rest))
   elseif cmd == "heal" and ns.heal then
     say(ns.heal.command(rest))
+  elseif cmd == "fish" and ns.fishing then
+    say(ns.fishing.command(rest))
+  elseif cmd == "bigmap" and ns.bigmap then
+    local r = ns.bigmap.command(rest)
+    if r then say(r) end
   elseif cmd == "shards" and ns.shards then
     say(ns.shards.command(rest))
   elseif (cmd == "buffs" or cmd == "aspect") and ns.imbue then
@@ -1760,6 +2013,6 @@ SlashCmdList.AUDHD = function(input)
     C.advance("route")
     say("route reset to step 1 (steps you've done are skipped again)")
   else
-    say("/wfn (show/hide), /wfn note <text>, /wfn done, /wfn later, /wfn back, /wfn goto <n>, /wfn route [name], /wfn routes, /wfn settings, /wfn minimap on|off, /wfn auto, /wfn ammo [off|<count>], /wfn arrow, /wfn map on|off, /wfn threat on|off, /wfn rares all|route|off, /wfn perf, /wfn spec [name], /wfn imbue [off|on], /wfn shards [off|on|max <n>|low <n>|lock|unlock|reset], /wfn heal [on|off|setup], /wfn buffs [off|on], /wfn announce [off|on], /wfn askbuffs [off|on], /wfn blocked, /wfn unblock, /wfn log, /wfn reset")
+    say("/wfn (show/hide), /wfn note <text>, /wfn done, /wfn later, /wfn back, /wfn goto <n>, /wfn route [name], /wfn routes, /wfn settings, /wfn minimap on|off, /wfn auto, /wfn ammo [off|<count>], /wfn arrow, /wfn map on|off, /wfn threat on|off, /wfn rares all|route|off, /wfn perf, /wfn spec [name], /wfn imbue [off|on], /wfn shards [off|on|max <n>|low <n>|lock|unlock|reset], /wfn heal [on|off|setup], /wfn fish [on|off|right|middle|4|5|status|loud on|off|volume <10-100>|lure on|off|zone on|off|map on|off], /wfn bigmap [on|off|replace on|off], /wfn buffs [off|on], /wfn announce [off|on], /wfn askbuffs [off|on], /wfn blocked, /wfn unblock, /wfn log, /wfn reset")
   end
 end

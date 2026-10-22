@@ -2,22 +2,24 @@
 ## Title: AuDHD
 ## Notes: Remembers the small stuff: buff and ammo reminders, easy group buffs and healing, and what to do next. /audhd settings
 ## Author: theSarcasticPixel
-## Version: 0.2.4
+## Version: 0.3.0
 ## SavedVariables: AuDHDDB, AuDHDLog
 
 Route_nelf_hunter_start.lua
+Route_nelf_hunter_start_fast.lua
 Route_human_any_start.lua
 Route_human_warlock_start.lua
 Route_human_hunter_start.lua
+Route_human_hunter_start_fast.lua
 Route_dwarfgnome_any_start.lua
 Route_dwarf_hunter_start.lua
 Route_gnome_warlock_start.lua
 Route_dwarf_shaman_start.lua
 Route_nelf_hunter_1-12.lua
-Route_nelf_hunter_engineer_1-12.lua
 Route_nelf_hunter_14-20_darkshore.lua
 Route_nelf_hunter_14-20_east.lua
 Route_nelf_hunter_14-20_best.lua
+Route_nelf_hunter_20-30.lua
 WalkData.lua
 Walk.lua
 Weights.lua
@@ -48,4 +50,7 @@ UseItem.lua
 Shards.lua
 Heal.lua
 Tooltip.lua
+Fishing.lua
+TileData.lua
+BigMap.lua
 Perf.lua
