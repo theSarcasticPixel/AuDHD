@@ -6,7 +6,16 @@ ns.ui = U
 
 local KIND = { accept = "Accept", ["do"] = "Do", turnin = "Turn in", train = "Train", bind = "Hearth", discover = "Flight path",
                buyweapon = "Buy", craft = "Craft", learn = "Learn", learnweapon = "Weapon skill", buyammo = "Ammo", visit = "Visit", run = "Dungeon", grind = "Grind" }
-local frame, title, stepText, distText, nextText
+local frame, title, stepText, distText, nextText, listen
+
+-- the Listen button: shown when Chronicle has lines for the current step, saying Stop while they play
+local function updateListen()
+  if not listen then return end
+  local C = ns.chronicle
+  local show = C and C.isOn() and #C.keys((ns.core.current())) > 0
+  listen:SetShown(show and true or false)
+  if show then listen:SetText(C.playing() and "Stop" or "Listen") end
+end
 
 local function button(parent, label, width, onClick)
   local b = ns.newFrame("UI", "Button", nil, parent, "UIPanelButtonTemplate")
@@ -79,6 +88,12 @@ function U.create()
     ChatFrame_OpenChat("/wfn note ", DEFAULT_CHAT_FRAME)
   end)
   note:SetPoint("LEFT", back, "RIGHT", 4, 0)
+  -- Chronicle installed (Chronicle.lua): play the current step's quest lines; hidden without it
+  listen = button(frame, "Listen", 50, function() if ns.chronicle then ns.chronicle.toggle(ns.core.current()) end end)
+  listen:SetPoint("LEFT", note, "RIGHT", 4, 0)
+  tip(listen, "Chronicle reads this step's quest out: what the quest giver said, and the turn-in. Click again to stop")
+  listen:Hide()
+  U.listen = listen   -- (the smoke test)
   -- the route picker: the routes planned for you, with their times (RoutePicker.lua)
   local routes = button(frame, "Routes", 60, function() if ns.picker then ns.picker.toggle() end end)
   routes:SetHeight(18)
@@ -94,6 +109,7 @@ function U.create()
     local d = ns.core.bearing(ns.core.target)
     local ammo = ns.ammo and ns.ammo.status()
     distText:SetText((d and ("%d yards"):format(math.floor(d)) or "") .. (ammo and ((d and "   " or "") .. ammo) or ""))
+    updateListen()
   end)
   if AuDHDDB.hidden then frame:Hide() end
   U.refresh()
@@ -167,6 +183,7 @@ function U.refresh()
     nextText:SetText(#nexts > 0 and ("Next: " .. table.concat(nexts, "\n")) or "")
   end
   frame:SetHeight(math.max(140, 60 + stepText:GetStringHeight() + nextText:GetStringHeight() + 40))
+  updateListen()
 end
 
 function U.toggle()

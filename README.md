@@ -46,7 +46,8 @@ Hold **Shift** while talking to an NPC to pause all of these.
 
 - **Accepts and hands in** route quests.
 - **Picks your quest reward**: an upgrade for your spec if there is one, otherwise the one that sells for the most.
-  `/audhd spec <name>` sets which spec rewards are scored for.
+  `/audhd spec <name>` sets which spec rewards are scored for. A Mining, Herbalism or Skinning book is always left for
+  you to choose.
 - **Sells grey items and repairs** at vendors.
 - **Hunters: buys ammo** to keep you stocked, leaving enough gold for your next training.
 - **Sell and train nudges.** Bags nearly full near a vendor, or new skills to learn near your class trainer? A reminder
@@ -74,6 +75,8 @@ Hold **Shift** while talking to an NPC to pause all of these.
 
 ## The route window
 
+- **Level 1 to 30 for every Alliance race**, any class: Night Elf, Human, Dwarf and Gnome. Pick one with the Routes
+  button; each route shows how long it takes.
 - **One step at a time.** "Take this quest", "kill 8 of these", "hand that in". Progress counts update as you play.
 - **It knows where you are.** Your place comes from your quest log and what you've done, not from a counter. Reloads,
   disconnects and quests done out of order don't lose your place.

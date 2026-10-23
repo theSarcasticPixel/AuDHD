@@ -48,6 +48,9 @@ local TABS = {
       function(on) AuDHDDB.mapHidden = not on or nil if ns.routemap then pcall(ns.routemap.refresh) end end },
     { "Threat on nameplates", function() return not AuDHDDB.threatHidden end,
       function(on) if ns.threat then ns.threat.command(on and "on" or "off") end end },
+    { "Listen button (with Chronicle)", function() return not AuDHDDB.chronicleOff end,
+      function(on) AuDHDDB.chronicleOff = not on or nil if ns.ui then ns.ui.refresh() end end,
+      "When the Chronicle addon is installed: a button on the route window that has Chronicle read the current step's quest out. AuDHD has no voices of its own" },
   }, extra = "sliders" },
   { "Automation", {
     { note = "Hold Shift to pause it (at a quest giver, a vendor)." },

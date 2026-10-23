@@ -119,10 +119,21 @@ function handlers.QUEST_PROGRESS()
   end)
 end
 
+A.PROFESSION_BOOKS = { [247840] = true, [247841] = true, [247846] = true }   -- Mining, Herbalism, Skinning
 function handlers.QUEST_COMPLETE()
   if paused() or not on("complete") then return end
   local n = GetNumQuestChoices() or 0
   if n <= 1 then GetQuestReward(1) return end   -- as Questie does: 1 also works when there's no choice
+  -- a profession book among the rewards (Mining, Herbalism, Skinning): always yours to choose, never picked for you
+  -- (the user, 2026-10-23: "right now they all take mining which not everyone will do")
+  for i = 1, n do
+    local link = GetQuestItemLink and GetQuestItemLink("choice", i)
+    local id = link and tonumber(link:match("item:(%d+)"))
+    if id and A.PROFESSION_BOOKS[id] then
+      log("REWARD_CHOICE_OFFERED", { q = GetQuestID(), why = "profession book" })
+      return
+    end
+  end
   -- several rewards: the route's planned weapon, else you choose (and the choices are logged)
   local want = ns.core and ns.core.plannedReward and ns.core.plannedReward(GetQuestID())
   local choices = {}
