@@ -6,7 +6,7 @@ WoW asks you to keep a lot in your head: which buffs have dropped, whether you h
 your group for, where the next quest is. AuDHD remembers that for you and puts the next thing right in front of you, one
 at a time, as a button you can click or an arrow you can follow.
 
-It does four things:
+What it does:
 
 - **Keeps your character ready.** Buttons for missing weapon imbues, oils and self buffs; ammo restocking; a soul shard
   counter; selling, repairing and training reminders.
@@ -14,6 +14,10 @@ It does four things:
   party quest progress and quest-complete messages.
 - **Shows what's next.** Step-by-step levelling routes with an arrow that follows real walking paths.
 - **Cuts down surprises.** Range and threat on nameplates, rare alerts and drop chances on tooltips.
+- **Makes fishing one click.** Cast and reel in with one mouse button, lures put on for you, a splash you can hear,
+  and each zone's fishing level coloured by your skill.
+- **Shows the whole world.** A detailed map of both continents that zooms from the game's painted map down to single
+  buildings.
 
 Every part can be turned on or off, so you only get the parts that help you.
 
@@ -121,7 +125,8 @@ A big map of the whole open world, both continents side by side, drawn from the 
 - **Zoom all the way.** Zoomed out it's the game's painted continent map; zoom in with the mouse wheel and it blends
   into the detailed minimap pictures, down to single buildings. Ironforge, Undercity, Stormwind and Orgrimmar fade in
   from their city maps.
-- **You and your route on it.** Your arrow, the walking path to your step, and the next steps as numbered dots.
+- **You, your group and your route on it.** Your arrow, a class-coloured dot for each party or raid member (hover for
+  who it is), the walking path to your step, and the next steps as numbered dots.
 - **Drag to move around**, or **Center on me** to follow you again.
 - Open it with `/audhd bigmap` or a key (Key Bindings → AuDHD → Detailed map). It can also take over your world map key,
   with a button to the game's own map. Off until you switch it on in the settings.

@@ -319,6 +319,67 @@ local function drawRoute(c)   -- c: the continent you're on
   end
 end
 
+-- your party or raid, a class-coloured dot each where the game says they are (the user, 2026-10-23: "you can't see
+-- party members on the map"), under your own arrow; hover one for who it is. Offline, on the other continent or
+-- where the game won't say (a dungeon, a boat): no dot.
+local mates, mateCount = {}, 0
+local function drawMates(c)
+  local n = 0
+  local raid = IsInRaid and IsInRaid()
+  local count = GetNumGroupMembers and GetNumGroupMembers() or 0
+  if c and count > 0 then
+    for i = 1, raid and count or count - 1 do
+      local u = (raid and "raid" or "party") .. i
+      if UnitExists(u) and not (UnitIsUnit and UnitIsUnit(u, "player")) and not (UnitIsConnected and not UnitIsConnected(u)) then
+        local m = C_Map.GetBestMapForUnit(u)
+        local p = m and C_Map.GetPlayerMapPosition(m, u)
+        local x, y
+        if p then x, y = p:GetXY() end
+        local uc, X, Y
+        if x and not (issecretvalue and issecretvalue(x)) then uc, X, Y = ns.walk.toWorld(m, x * 100, y * 100) end
+        if uc == c and X then
+          n = n + 1
+          local d = mates[n]
+          if not d then
+            d = ns.newFrame("BigMap", "Frame", nil, view)
+            d:SetSize(16, 16)
+            d.edge = d:CreateTexture(nil, "OVERLAY", nil, 1)
+            d.edge:SetPoint("CENTER")
+            d.edge:SetSize(22, 22)
+            d.edge:SetTexture("Interface\\AddOns\\" .. ADDON .. "\\SoftOval")
+            d.edge:SetVertexColor(0, 0, 0, 0.9)
+            d.dot = d:CreateTexture(nil, "OVERLAY", nil, 2)
+            d.dot:SetPoint("CENTER")
+            d.dot:SetSize(14, 14)
+            d.dot:SetTexture("Interface\\AddOns\\" .. ADDON .. "\\SoftOval")
+            -- hover shows who it is; a click still drags the map
+            if d.SetMouseClickEnabled then d:SetMouseClickEnabled(false) d:SetMouseMotionEnabled(true) else d:EnableMouse(true) end
+            d:SetScript("OnEnter", function(self)
+              if not GameTooltip then return end
+              GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+              GameTooltip:SetUnit(self.unit)
+              GameTooltip:Show()
+            end)
+            d:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+            mates[n] = d
+          end
+          d.unit = u
+          local _, class = UnitClass(u)
+          local col = class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
+          d.dot:SetVertexColor(col and col.r or 1, col and col.g or 1, col and col.b or 1, 1)
+          local sx, sy = px(grid(c, X, Y))
+          d:ClearAllPoints()
+          d:SetPoint("CENTER", view, "TOPLEFT", sx, -sy)
+          d:SetFrameLevel(view:GetFrameLevel() + 7)
+          d:Show()
+        end
+      end
+    end
+  end
+  for i = n + 1, #mates do mates[i]:Hide() end
+  mateCount = n
+end
+
 local last = { at = 0 }
 local function update(force)
   local c, X, Y
@@ -348,6 +409,7 @@ local function update(force)
   -- the route moves with the map, and is worked out again twice a second
   local now = GetTime()
   if force or now - last.at > 0.5 then last.at = now drawRoute(st.mine) end
+  drawMates(st.mine)
 end
 
 local function create()
@@ -397,7 +459,11 @@ local function create()
   sea:SetAllPoints(view)
   sea:SetTexture("Interface\\AddOns\\" .. ADDON .. "\\Sea", "REPEAT", "REPEAT")
   sea:Hide()
-  arrow = view:CreateTexture(nil, "OVERLAY")
+  -- your arrow on a layer of its own, over the step and party dots
+  local top = ns.newFrame("BigMap", "Frame", nil, view)
+  top:SetAllPoints(view)
+  top:SetFrameLevel(view:GetFrameLevel() + 10)
+  arrow = top:CreateTexture(nil, "OVERLAY")
   arrow:SetTexture("Interface\\Minimap\\MinimapArrow")
   arrow:SetSize(28, 28)
   label = view:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
@@ -463,7 +529,15 @@ function B.toggle()
   if frame and frame:IsShown() then frame:Hide() return true end
   return B.show()
 end
-function AuDHD_ToggleBigMap() B.toggle() end
+-- (a world map key still taken over when the map or the takeover is off opens the game's map, never nothing)
+function AuDHD_ToggleBigMap()
+  if B.held and B.held() and not (isOn() and AuDHDDB.bigMapReplace) then
+    if B.bindKeys then B.bindKeys() end
+    if ToggleWorldMap then ToggleWorldMap() elseif WorldMapFrame then WorldMapFrame:Show() end
+    return
+  end
+  B.toggle()
+end
 function B.isOn() return isOn() and true or false end
 function B.set(on)
   AuDHDDB.bigMap = on or nil
@@ -473,23 +547,31 @@ end
 -- instead of the world map: your world map key (M) opens this one (setting "bigMapReplace"); the game's map is still
 -- one click away (Game map) and opens as always from its other buttons. Key bindings can't change in combat: then
 -- it waits for the fight to end.
+-- Every time: the keys taken before are let go first, and the world map's keys are read only then (with our own
+-- takeover in place the game may not report them), so switching it off always gives the key back (the user,
+-- 2026-10-23: with the option off the world map key did nothing).
 local keys = ns.newFrame("BigMap", "Frame")
-local keysTag
+local held = {}       -- the keys taken over now
+local quietUntil = 0  -- our own changes send UPDATE_BINDINGS too: not answered, or it would go round forever
 local function bindKeys()
   if InCombatLockdown() then keys.later = true return end
   keys.later = nil
-  local list = {}
-  if isOn() and AuDHDDB.bigMapReplace and GetBindingKey then list = { GetBindingKey("TOGGLEWORLDMAP") } end
-  local tag = table.concat(list, ",")
-  if tag == keysTag then return end   -- (setting them sends UPDATE_BINDINGS again)
-  keysTag = tag
   ClearOverrideBindings(keys)
-  for _, k in ipairs(list) do SetOverrideBinding(keys, false, k, "AUDHD_BIGMAP") end
+  held = {}
+  if isOn() and AuDHDDB.bigMapReplace and GetBindingKey then
+    for _, k in ipairs({ GetBindingKey("TOGGLEWORLDMAP") }) do
+      SetOverrideBinding(keys, false, k, "AUDHD_BIGMAP")
+      held[#held + 1] = k
+    end
+  end
+  quietUntil = GetTime() + 0.5
 end
 B.bindKeys = bindKeys
+function B.held() return #held > 0 end
 for _, e in ipairs({ "PLAYER_LOGIN", "UPDATE_BINDINGS", "PLAYER_REGEN_ENABLED" }) do keys:RegisterEvent(e) end
 keys:SetScript("OnEvent", function(_, e)
   if e == "PLAYER_REGEN_ENABLED" and not keys.later then return end
+  if e == "UPDATE_BINDINGS" and GetTime() < quietUntil then return end
   bindKeys()
 end)
 function B.artOn() return not AuDHDDB.bigMapArtOff end
@@ -510,6 +592,7 @@ function B.shown()
   return n, st.mine, st.cx and math.floor(st.cx), st.cy and math.floor(st.cy)
 end
 function B.artShown() return artCount end
+function B.matesShown() return mateCount end
 
 -- /wfn bigmap [on|off|replace on|off]
 function B.command(arg)
