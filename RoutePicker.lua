@@ -29,7 +29,7 @@ function P.choices()
   local level = UnitLevel("player") or 1
   local out = {}
   for key, r in pairs(ns.routes or {}) do
-    local sameChar = ns.raceFits(r.race, race) and (not r.class or not class or r.class:upper() == class:upper())
+    local sameChar = ns.routeFits(r, race) and (not r.class or not class or r.class:upper() == class:upper())
     if sameChar and (r.target or 0) > level then out[#out + 1] = { key = key, r = r } end
   end
   table.sort(out, function(a, b) return (a.r.minutes or 1e9) < (b.r.minutes or 1e9) end)

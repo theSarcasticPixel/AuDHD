@@ -131,6 +131,16 @@ function C.peek(k)
   end
 end
 
+-- the steps still to do, in order, from the one you're on (at most limit): the detailed map's quest icons
+function C.ahead(limit)
+  local out, o, st, steps = {}, order(), rdb(), C.route().steps
+  for p = st.pos, #o do
+    local s = steps[o[p]]
+    if s and not C.isDone(s, o[p]) then out[#out + 1] = s if limit and #out >= limit then break end end
+  end
+  return out
+end
+
 -- ------------------------------------------------------------------ is a step done?
 local turnedIn = {}   -- this session: the game's completed flag can lag a moment behind QUEST_TURNED_IN
 local function completed(q) return turnedIn[q] or C_QuestLog.IsQuestFlaggedCompleted(q) end
@@ -908,6 +918,7 @@ local function readyToHandIn(q)
   end
   return true
 end
+C.readyToHandIn = readyToHandIn
 -- can you do this step right now?
 -- a quest's work isn't offered while its mobs are more than a level above you (mlv): Twisted Hatred, taken at 9 by
 -- auto-accept, sent you to level 11 spiders "on the way" (the user, 2026-10-22: "not optimal"). When the planned level
@@ -1489,6 +1500,7 @@ end
 -- without it"). Until you say "Do it", the GPS doesn't send you to its work.
 local RUN = 7   -- yards a second, on foot
 local offQueue, offShowing = {}, false
+local carried = {}   -- quests asked about because you switched routes (the wording and buttons differ)
 local function thousands(n)
   local s = tostring(math.floor(n + 0.5))
   return (s:reverse():gsub("(%d%d%d)", "%1,"):reverse():gsub("^,", ""))
@@ -1532,7 +1544,10 @@ local function offShowNext()
   local r = C.route()
   local name = ((r.ends or {})[q] or (r.objs or {})[q] or {}).t or (C_QuestLog.GetTitleForQuestID and C_QuestLog.GetTitleForQuestID(q)) or ("quest " .. q)
   local secs, xp, far = C.offRouteCost(q)
-  local lines = { ("You took |cffffd200%s|r. It isn't on your route."):format(name) }
+  local carry = carried[q]
+  carried[q] = nil
+  local lines = { carry and ("Your new route doesn't use |cffffd200%s|r, which is in your log."):format(name)
+    or ("You took |cffffd200%s|r. It isn't on your route."):format(name) }
   if far then
     lines[#lines + 1] = "Part of it is on another continent: a long trip."
   elseif secs then
@@ -1546,9 +1561,9 @@ local function offShowNext()
   else
     lines[#lines + 1] = "AuDHD can't tell how long it takes."
   end
-  lines[#lines + 1] = "Do it?"
+  lines[#lines + 1] = carry and "Keep it, or abandon it?" or "Do it?"
   offShowing = true
-  local dlg = StaticPopup_Show("AUDHD_OFFROUTE", table.concat(lines, "\n"))
+  local dlg = StaticPopup_Show(carry and "AUDHD_CARRY" or "AUDHD_OFFROUTE", table.concat(lines, "\n"))
   if dlg then dlg.data = { q = q } else offShowing = false end
   log("OFFROUTE_ASK", { q = q, secs = secs and math.floor(secs), xp = xp, far = far or nil })
 end
@@ -1561,6 +1576,35 @@ StaticPopupDialogs["AUDHD_OFFROUTE"] = {
   OnHide = function() offShowing = false; C_Timer.After(0.2, offShowNext) end,
   timeout = 0, whileDead = true, hideOnEscape = false, preferredIndex = 3,
 }
+-- switching routes: the quests in your log the new route doesn't use, one pop-up each (the user, 2026-10-23: "highlight
+-- the quests in the user's log that won't be part of the next route and give them the option to keep them or abandon
+-- them, showing them the xp/hr with them vs without")
+StaticPopupDialogs["AUDHD_CARRY"] = {
+  text = "%s",
+  button1 = "Keep it",
+  button2 = "Abandon",
+  OnAccept = function(_, data) C.offRouteChoice(data, true) end,
+  OnCancel = function(_, data, reason) if reason == "clicked" then C.offRouteChoice(data, false) end end,
+  OnHide = function() offShowing = false; C_Timer.After(0.2, offShowNext) end,
+  timeout = 0, whileDead = true, hideOnEscape = false, preferredIndex = 3,
+}
+function C.carryAsk()
+  if not C.route() then return end
+  local st = rdb()
+  st.offAsked = st.offAsked or {}
+  local ok, n = pcall(C_QuestLog.GetNumQuestLogEntries)
+  for li = 1, (ok and n or 0) do
+    local info = C_QuestLog.GetInfo(li)
+    local q = info and not info.isHeader and info.questID
+    -- (one ready to hand in isn't asked: the route offers its hand-in on the way)
+    if q and not st.offAsked[q] and not onRouteQ(q) and not readyToHandIn(q) then
+      st.manual["o" .. q] = true   -- not offered until you answer
+      carried[q] = true
+      offQueue[#offQueue + 1] = q
+    end
+  end
+  if #offQueue > 0 then C_Timer.After(0.5, offShowNext) end
+end
 -- abandon a quest in your log: true when the game took it
 function C.abandon(q)
   if C_QuestLog.SetSelectedQuest and C_QuestLog.SetAbandonQuest and C_QuestLog.AbandonQuest then
@@ -1646,6 +1690,22 @@ function C.stretchChoice(data, attempt)
   C.onStepChanged()
 end
 
+-- the stretch pop-up's question for a step, or nil when there's nothing to ask: never at a hand-in (its work is done),
+-- and one asked for the quest's level alone only while it's still above your real level + 2, with that level in the
+-- text (the route's was the level the plan expected: "Report to Orgnil is level 7 and you're level 4" at level 7, the
+-- user 2026-10-23). A rare or an elite is always asked.
+function C.stretchQuestion(step)
+  local p = step and step.pop
+  if not p or step.k == "turnin" then return nil end
+  local me = UnitLevel and UnitLevel("player") or 0
+  local ql = p.ql or tonumber((p.q or ""):match(" is level (%d+)"))
+  local text = p.q or ""
+  local levelOnly = p.lo or (p.ql == nil and not text:find("(rare)", 1, true) and not text:find("(an elite", 1, true))
+  if levelOnly and ql and me > 0 and ql <= me + 2 then return nil end
+  if me > 0 then return (p.q:gsub("you're level %d+", "you're level " .. me)) end
+  return p.q
+end
+
 local ammoCheck, moneyCheck   -- below, with the events that finish steps
 function C.onStepChanged()
   local step, i, pos, total, via = C.current()
@@ -1653,8 +1713,9 @@ function C.onStepChanged()
     C.setWaypoint(step)
     log("STEP", { n = i, pos = pos, k = step.k, q = step.q, text = step.t, via = via })
     if step.k == "buyammo" then C_Timer.After(0.5, ammoCheck) end
-    if step.pop and not rdb().asked[i] then
-      local dlg = StaticPopup_Show("AUDHD_STRETCH", step.pop.q .. "\n\n" .. (step.pop.skip or ""))
+    local ask = C.stretchQuestion(step)
+    if ask and not rdb().asked[i] then
+      local dlg = StaticPopup_Show("AUDHD_STRETCH", ask .. "\n\n" .. (step.pop.skip or ""))
       if dlg then dlg.data = { i = i, q = step.q, before = step.pop.before } end
     end
   end
@@ -1777,8 +1838,12 @@ function ns.raceFits(rrace, race)
   for x in rrace:gmatch("[^/]+") do if x:lower() == race:lower() then return true end end
   return false
 end
+-- and its side: a Skyborne can be either, so their routes say which
+function ns.routeFits(r, race)
+  return ns.raceFits(r.race, race) and (not r.faction or r.faction == UnitFactionGroup("player"))
+end
 local function fits(r, race, class, level)
-  return r and ns.raceFits(r.race, race) and (not r.class or r.class:upper() == (class or ""):upper())
+  return r and ns.routeFits(r, race) and (not r.class or r.class:upper() == (class or ""):upper())
     and (r.target or 0) > level
 end
 function C.pickCharRoute()
@@ -1902,6 +1967,7 @@ function C.setRoute(key)
   C.onStepChanged()
   if ns.ui then ns.ui.refresh() end
   say("route: " .. (ns.routes[key].title or key))
+  C.carryAsk()
 end
 SLASH_AUDHD1 = "/audhd"
 SLASH_AUDHD2 = "/wfn"

@@ -55,8 +55,32 @@ end
 
 -- what your fishing button (and key) do now; only touched when it changes
 local held
+-- any mouse button down, or the game turning the camera: the bindings stay as they are. The game's own camera turn (a
+-- right press with a mob under the cursor) ends on the release of the binding it began with; swapping the right button
+-- to the cast mid-turn swallowed that release and left the camera locked to the mouse, nothing clickable (the user,
+-- 2026-10-23, fishing in Stormwind)
+local MOUSE_BUTTONS = { "LeftButton", "RightButton", "MiddleButton", "Button4", "Button5" }
+local function anyButtonDown()
+  if not IsMouseButtonDown then return false end
+  for _, b in ipairs(MOUSE_BUTTONS) do if IsMouseButtonDown(b) then return true end end
+  return false
+end
+local gameLook   -- the game began a camera turn on the right button while fishing
+local function busyMouse()
+  local looking = IsMouselooking and IsMouselooking()
+  if looking and not lookStarted then
+    if IsMouseButtonDown and IsMouseButtonDown("RightButton") then gameLook = true
+    elseif gameLook then
+      -- the right button is up and the camera still turns: the release went missing, so let go of it here
+      gameLook = nil
+      if MouselookStop then MouselookStop() end
+      looking = false
+    end
+  elseif not looking then gameLook = nil end
+  return looking or anyButtonDown()
+end
 local function bind()
-  if InCombatLockdown() or not owner or held() then return end
+  if InCombatLockdown() or not owner or held() or busyMouse() then return end
   local want
   if ready() then
     local key = mouseKey()
@@ -115,14 +139,46 @@ local function loud(on)
   end
 end
 
--- your fishing skill: { rank, rank with the lure's bonus }, from the skill list
+-- your fishing skill: { rank, rank with the lure's bonus }, from the skill list. The list only has the skills under open
+-- headers: a collapsed "Secondary Skills" hid Fishing, read as no skill, and no lure ever went on (the user, 2026-10-23:
+-- Shiny Baubles in the bags, skill 75). Closed headers are opened for the read and closed again.
+local reopening = 0   -- (until then, SKILL_LINES_CHANGED is our own opening and closing)
+local FISHING_LINE = 356
 local function skill()
+  -- the professions list first: Fishing is skill line 356 whatever the language (the user, 2026-10-23: still no
+  -- "(you: 75)" after the header fix; this client lists professions there)
+  if GetProfessions and GetProfessionInfo then
+    local fish = select(4, GetProfessions())
+    if fish then
+      local _, _, rank, _, _, _, line, mod = GetProfessionInfo(fish)
+      if rank and (line == nil or line == FISHING_LINE) then return rank, rank + (mod or 0) end
+    end
+  end
   local want = spellName()
   if not (GetNumSkillLines and GetSkillLineInfo) or not want then return nil end
-  for i = 1, GetNumSkillLines() do
-    local name, header, _, rank, _, mod = GetSkillLineInfo(i)
-    if not header and name == want then return rank, rank + (mod or 0) end
+  local function find()
+    for i = 1, GetNumSkillLines() do
+      local name, header, _, rank, _, mod = GetSkillLineInfo(i)
+      if not header and name == want then return rank, rank + (mod or 0) end
+    end
   end
+  local rank, total = find()
+  if rank or not (ExpandSkillHeader and CollapseSkillHeader) then return rank, total end
+  local opened = {}
+  for i = GetNumSkillLines(), 1, -1 do
+    local name, header, expanded = GetSkillLineInfo(i)
+    if header and not expanded then opened[#opened + 1] = name ExpandSkillHeader(i) end
+  end
+  if #opened == 0 then return nil end
+  reopening = GetTime() + 1
+  rank, total = find()
+  for _, h in ipairs(opened) do
+    for i = 1, GetNumSkillLines() do
+      local name, header = GetSkillLineInfo(i)
+      if header and name == h then CollapseSkillHeader(i) break end
+    end
+  end
+  return rank, total
 end
 
 -- lures: the biggest bonus your skill can use (the game's skill needed to put each one on)
@@ -132,7 +188,7 @@ local LURES = {
   { 7307, 75, 100 },    -- Flesh Eating Worm: +75, needs 100
   { 6811, 50, 50 },     -- Aquadynamic Fish Lens: +50, needs 50
   { 6530, 50, 50 },     -- Nightcrawlers: +50, needs 50
-  { 6529, 25, 1 },      -- Shiny Bauble: +25
+  { 6529, 25, 0 },      -- Shiny Bauble: +25, any skill
 }
 local function count(id)
   if C_Item and C_Item.GetItemCount then return C_Item.GetItemCount(id) or 0 end
@@ -142,7 +198,12 @@ end
 local function lureToUse()
   if AuDHDDB.fishLureOff or not GetWeaponEnchantInfo then return nil end
   if GetWeaponEnchantInfo() then return nil end   -- the main hand (the pole) has one
-  local rank = skill() or 0
+  local rank = skill()
+  if not rank then
+    -- the skill can't be read: the lure that needs the least (the game says no if it's too much)
+    for i = #LURES, 1, -1 do if count(LURES[i][1]) > 0 then return LURES[i][1] end end
+    return nil
+  end
   for _, l in ipairs(LURES) do
     if rank >= l[3] and count(l[1]) > 0 then return l[1] end
   end
@@ -271,6 +332,7 @@ end
 watcher:SetScript("OnEvent", function(_, e, a, b, c)
   if e == "GLOBAL_MOUSE_DOWN" or e == "GLOBAL_MOUSE_UP" then return mouse(e, a) end
   if e == "UPDATE_MOUSEOVER_UNIT" then return bind() end
+  if e == "SKILL_LINES_CHANGED" and GetTime() < reopening then return end
   if e == "ZONE_CHANGED_NEW_AREA" or e == "ZONE_CHANGED" or e == "ZONE_CHANGED_INDOORS" or e == "SKILL_LINES_CHANGED" then
     return showLevels()
   end
@@ -412,6 +474,9 @@ local function status()
     "button: " .. mouseKey(),
     "now: " .. (bound and bound:gsub("BUTTON%d", "") or "nothing bound") .. (fishingNow and ", line out" or ""),
     "in combat: " .. (InCombatLockdown() and "yes" or "no"),
+    "skill: " .. tostring(skill() or "can't read it"),
+    "lure: " .. (AuDHDDB.fishLureOff and "off" or (GetWeaponEnchantInfo and GetWeaponEnchantInfo()) and "one on the pole"
+      or (function() local id = lureToUse() return id and ("item " .. id .. " next click") or "none in the bags" end)()),
     "set up: " .. (owner and castButton and "yes" or "no") .. ", cast: " .. tostring(castButton and castButton:GetAttribute("macrotext")),
   }
   if mouseKey() == "BUTTON2" and somethingThere() then parts[#parts + 1] = "the right button is left alone: something is under the cursor" end

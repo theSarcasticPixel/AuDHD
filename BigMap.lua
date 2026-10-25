@@ -259,7 +259,90 @@ local function drawArt()
   for _, t in pairs(tex) do t:SetAlpha(fade) end
 end
 
--- the way to your step (Walk.lua's path, world yards) and the next steps as numbered dots
+-- a pick-up or hand-in: the game's quest icon (a yellow ! or ?; a hand-in greyed out while the quest isn't finished)
+-- on texture t; false for any other step (the user, 2026-10-23: "we can't see any quest icons, accept or hand in")
+local ICON = { accept = "Interface\\GossipFrame\\AvailableQuestIcon", turnin = "Interface\\GossipFrame\\ActiveQuestIcon" }
+local function questIcon(t, s)
+  if not (s and ICON[s.k]) then return false end
+  t:SetTexture(ICON[s.k])
+  local grey = s.k == "turnin" and not (s.q and ns.core.readyToHandIn and ns.core.readyToHandIn(s.q))
+  if t.SetDesaturated then t:SetDesaturated(grey) end
+  t:SetVertexColor(1, 1, 1, grey and 0.75 or 1)
+  return true
+end
+local function tipFor(f)
+  if f.SetMouseClickEnabled then f:SetMouseClickEnabled(false) f:SetMouseMotionEnabled(true) else f:EnableMouse(true) end
+  f:SetScript("OnEnter", function(self)
+    if not (GameTooltip and self.tip) then return end
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:SetText(self.tip, 1, 1, 1, 1, true)
+    GameTooltip:Show()
+  end)
+  f:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+end
+
+-- the rest of the route's pick-ups and hand-ins in view, small and unnumbered, and the hand-ins of finished quests in
+-- your log the route doesn't hand in itself
+local marks, markCount, iconCount, logCount = {}, 0, 0, 0
+local aheadAt, ahead = -10, {}
+local function drawMarks(c, numbered)
+  local n = 0
+  local function mark(sc, X, Y, size, tip)
+    local x, y = px(grid(sc, X, Y))
+    if x < -10 or x > W + 10 or y < -10 or y > H - 20 or n >= 200 then return nil end
+    n = n + 1
+    local f = marks[n]
+    if not f then
+      f = ns.newFrame("BigMap", "Frame", nil, view)
+      f.icon = f:CreateTexture(nil, "OVERLAY")
+      f.icon:SetAllPoints(f)
+      tipFor(f)
+      marks[n] = f
+    end
+    f:SetSize(size, size)
+    f:ClearAllPoints()
+    f:SetPoint("CENTER", view, "TOPLEFT", x, -y)
+    f:SetFrameLevel(view:GetFrameLevel() + 4)
+    f.tip = tip
+    f:Show()
+    return f
+  end
+  logCount = 0
+  if c and ns.core.ahead then
+    local now = GetTime()
+    if now - aheadAt > 3 then aheadAt = now ahead = ns.core.ahead() or {} end
+    local handed = {}
+    for _, s in ipairs(ahead) do
+      if s.k == "turnin" and s.q then handed[s.q] = true end
+      if not numbered[s] and ICON[s.k] and s.m and s.x and s.y then
+        local sc, X, Y = ns.walk.toWorld(s.m, s.x, s.y)
+        if sc == c and X then
+          local f = mark(sc, X, Y, 14, s.t)
+          if f then questIcon(f.icon, s) f:SetAlpha(0.85) end
+        end
+      end
+    end
+    local ends = ns.core.route and (ns.core.route() or {}).ends or {}
+    local ok, count = pcall(C_QuestLog.GetNumQuestLogEntries)
+    for li = 1, (ok and count or 0) do
+      local info = C_QuestLog.GetInfo(li)
+      local q = info and not info.isHeader and info.questID
+      local e = q and ends[q]
+      if e and e.m and not handed[q] and ns.core.readyToHandIn and ns.core.readyToHandIn(q) then
+        local sc, X, Y = ns.walk.toWorld(e.m, e.x, e.y)
+        if sc == c and X then
+          local f = mark(sc, X, Y, 16, ("Turn in %s to %s"):format(e.t or "?", e.n or "?"))
+          if f then questIcon(f.icon, { k = "turnin", q = q }) f:SetAlpha(1) logCount = logCount + 1 end
+        end
+      end
+    end
+  end
+  for i = n + 1, #marks do marks[i]:Hide() end
+  markCount = n
+end
+
+-- the way to your step (Walk.lua's path, world yards) and the next steps as numbered dots (a pick-up or hand-in as
+-- its quest icon, the number beside it)
 local function drawRoute(c)   -- c: the continent you're on
   for _, l in ipairs(lines) do l:Hide() end
   for _, d in ipairs(dots) do d:Hide() end
@@ -291,9 +374,12 @@ local function drawRoute(c)   -- c: the continent you're on
     end
   end
   local k = 0
+  local numbered = {}
+  iconCount = 0
   for i = 0, 8 do
     local s = ns.core.peek(i)
     if not s then break end
+    numbered[s] = true
     local sc, X, Y
     if s.m and s.x and s.y then sc, X, Y = ns.walk.toWorld(s.m, s.x, s.y) end
     if (sc == 0 or sc == 1) and X then
@@ -305,10 +391,18 @@ local function drawRoute(c)   -- c: the continent you're on
         d.bg = d:CreateTexture(nil, "OVERLAY")
         d.bg:SetAllPoints(d)
         d.bg:SetColorTexture(0, 0, 0, 0.75)
+        d.icon = d:CreateTexture(nil, "OVERLAY")
+        d.icon:SetAllPoints(d)
         d.text = d:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-        d.text:SetPoint("CENTER")
+        tipFor(d)
         dots[k] = d
       end
+      local quest = questIcon(d.icon, s)
+      d.icon:SetShown(quest)
+      d.bg:SetShown(not quest)
+      d.text:ClearAllPoints()
+      if quest then d.text:SetPoint("CENTER", d, "BOTTOMRIGHT", 1, 3) iconCount = iconCount + 1 else d.text:SetPoint("CENTER") end
+      d.tip = s.t
       local x, y = px(grid(sc, X, Y))
       d:ClearAllPoints()
       d:SetPoint("CENTER", view, "TOPLEFT", x, -y)
@@ -317,6 +411,7 @@ local function drawRoute(c)   -- c: the continent you're on
       d:Show()
     end
   end
+  drawMarks(c, numbered)
 end
 
 -- your party or raid, a class-coloured dot each where the game says they are (the user, 2026-10-23: "you can't see
@@ -380,6 +475,70 @@ local function drawMates(c)
   mateCount = n
 end
 
+-- the place a guard told you the way to (a trainer, the bank): the game's flag, on the map you're on or the zone around
+-- it, with its name on hover (the user, 2026-10-23: "it doesn't show things like the profession skill trainer that
+-- you've asked a guard about")
+local poi, poiShown = nil, 0
+local function guardFlag()
+  local G = C_GossipInfo
+  if not (G and G.GetPoiForUiMapID and G.GetPoiInfo and C_Map) then return nil end
+  local m = C_Map.GetBestMapForUnit("player")
+  for _ = 1, 3 do
+    if not m then return nil end
+    local ok, id = pcall(G.GetPoiForUiMapID, m)
+    if ok and id then
+      local ok2, info = pcall(G.GetPoiInfo, m, id)
+      local pos = ok2 and info and info.position
+      if pos then
+        local x, y = pos:GetXY()
+        return m, x * 100, y * 100, info.name, info.textureIndex
+      end
+    end
+    local mi = C_Map.GetMapInfo and C_Map.GetMapInfo(m)
+    m = mi and mi.parentMapID
+  end
+end
+local function drawPoi(c)
+  local m, x, y, name, texIndex = guardFlag()
+  local pc, X, Y
+  if m then pc, X, Y = ns.walk.toWorld(m, x, y) end
+  if not (c and pc == c and X) then
+    if poi then poi:Hide() end
+    poiShown = 0
+    return
+  end
+  if not poi then
+    poi = ns.newFrame("BigMap", "Frame", nil, view)
+    poi:SetSize(20, 20)
+    poi.icon = poi:CreateTexture(nil, "OVERLAY")
+    poi.icon:SetAllPoints(poi)
+    if poi.SetMouseClickEnabled then poi:SetMouseClickEnabled(false) poi:SetMouseMotionEnabled(true) else poi:EnableMouse(true) end
+    poi:SetScript("OnEnter", function(self)
+      if not (GameTooltip and self.name) then return end
+      GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+      GameTooltip:SetText(self.name, 1, 1, 1)
+      GameTooltip:Show()
+    end)
+    poi:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+  end
+  -- the game's own flag (its minimap icon sheet); a plain gold square if this client can't say which
+  local coords = texIndex and ((C_Minimap and C_Minimap.GetPOITextureCoords and { C_Minimap.GetPOITextureCoords(texIndex) })
+    or (GetPOITextureCoords and { GetPOITextureCoords(texIndex) }))
+  if coords and coords[4] then
+    poi.icon:SetTexture("Interface\\Minimap\\POIIcons")
+    poi.icon:SetTexCoord(coords[1], coords[2], coords[3], coords[4])
+  else
+    poi.icon:SetColorTexture(1, 0.82, 0, 1)
+  end
+  poi.name = name
+  local sx, sy = px(grid(c, X, Y))
+  poi:ClearAllPoints()
+  poi:SetPoint("CENTER", view, "TOPLEFT", sx, -sy)
+  poi:SetFrameLevel(view:GetFrameLevel() + 6)
+  poi:Show()
+  poiShown = 1
+end
+
 local last = { at = 0 }
 local function update(force)
   local c, X, Y
@@ -408,7 +567,7 @@ local function update(force)
   end
   -- the route moves with the map, and is worked out again twice a second
   local now = GetTime()
-  if force or now - last.at > 0.5 then last.at = now drawRoute(st.mine) end
+  if force or now - last.at > 0.5 then last.at = now drawRoute(st.mine) drawPoi(st.mine) end
   drawMates(st.mine)
 end
 
@@ -593,6 +752,8 @@ function B.shown()
 end
 function B.artShown() return artCount end
 function B.matesShown() return mateCount end
+function B.iconsShown() return iconCount, markCount, logCount end
+function B.poiShown() return poiShown, poi and poi.name end
 
 -- /wfn bigmap [on|off|replace on|off]
 function B.command(arg)

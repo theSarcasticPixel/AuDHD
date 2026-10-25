@@ -54,9 +54,21 @@ local function apply()
 end
 
 -- called on every step change and bag change
+-- the item to show: in a step done together, the first part with one that's in your log and not done yet
+local function itemFor(step)
+  if not step then return nil end
+  for _, m in ipairs(step.mem or {}) do
+    if m.ui and m.q and C_QuestLog.GetLogIndexForQuestID(m.q) and not (C_QuestLog.IsComplete and C_QuestLog.IsComplete(m.q)) then
+      return m.ui
+    end
+  end
+  return step.ui
+end
+M.itemFor = itemFor   -- (the smoke test)
+
 function M.refresh()
   local step = ns.core and ns.core.current and ns.core.current()
-  local id = step and step.ui
+  local id = itemFor(step)
   if id ~= wanted or pending or (button and (button:IsShown() ~= (id and count(id) > 0 and not AuDHDDB.useItemOff or false))) then
     wanted = id
     apply()

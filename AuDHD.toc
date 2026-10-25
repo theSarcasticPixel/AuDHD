@@ -2,7 +2,7 @@
 ## Title: AuDHD
 ## Notes: Remembers the small stuff: buff and ammo reminders, easy group buffs and healing, and what to do next. /audhd settings
 ## Author: theSarcasticPixel
-## Version: 0.3.2
+## Version: 0.3.3
 ## SavedVariables: AuDHDDB, AuDHDLog
 
 Route_nelf_any_start.lua
@@ -16,14 +16,27 @@ Route_human_hunter_start.lua
 Route_human_hunter_start_fast.lua
 Route_dwarfgnome_any_start.lua
 Route_dwarfgnome_any_16-30.lua
+Route_human_hunter_16-30.lua
+Route_dwarf_hunter_16-30.lua
+Route_human_warlock_16-30.lua
+Route_gnome_warlock_16-30.lua
+Route_dwarf_shaman_16-30.lua
 Route_dwarf_hunter_start.lua
 Route_gnome_warlock_start.lua
 Route_dwarf_shaman_start.lua
-Route_nelf_hunter_1-12.lua
-Route_nelf_hunter_14-20_darkshore.lua
-Route_nelf_hunter_14-20_east.lua
-Route_nelf_hunter_14-20_best.lua
-Route_nelf_hunter_20-30.lua
+Route_nelf_hunter_16-30.lua
+Route_nelf_hunter_16-30_fast.lua
+Route_human_hunter_16-30_fast.lua
+Route_orctroll_any_start.lua
+Route_orctroll_any_16-30.lua
+Route_undead_any_start.lua
+Route_undead_any_16-30.lua
+Route_tauren_any_start.lua
+Route_tauren_any_16-30.lua
+Route_skyborne_a_any_start.lua
+Route_skyborne_a_any_16-30.lua
+Route_skyborne_h_any_start.lua
+Route_skyborne_h_any_16-30.lua
 WalkData.lua
 Walk.lua
 Weights.lua

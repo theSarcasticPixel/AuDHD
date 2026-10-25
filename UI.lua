@@ -6,7 +6,32 @@ ns.ui = U
 
 local KIND = { accept = "Accept", ["do"] = "Do", turnin = "Turn in", train = "Train", bind = "Hearth", discover = "Flight path",
                buyweapon = "Buy", craft = "Craft", learn = "Learn", learnweapon = "Weapon skill", buyammo = "Ammo", visit = "Visit", run = "Dungeon", grind = "Grind" }
-local frame, title, stepText, distText, nextText, listen
+local frame, title, stepText, distText, nextText, listen, skip
+
+-- one spawn the whole server shares (cw, from manual_overrides "contested"): the warning, and whether Skip drops only
+-- that quest (a pick-up, or a step that's only that quest's work) or a whole step done together
+local function contested(step)
+  if step.k == "accept" then return step.cw, true end
+  if step.k ~= "do" then return nil end
+  if not step.mem then return step.cw, true end
+  local warn, open = nil, 0
+  for _, m in ipairs(step.mem) do
+    if m.q and C_QuestLog.GetLogIndexForQuestID(m.q) and not (C_QuestLog.IsComplete and C_QuestLog.IsComplete(m.q)) then
+      open = open + 1
+      if m.cw then warn = m.cw end
+    end
+  end
+  return warn, open <= 1
+end
+U.contested = contested   -- (the smoke test)
+
+-- Skip lit up (an orange border and its highlight held) while the step warns of a shared spawn
+local function lightSkip(on)
+  if not skip then return end
+  if on then skip:LockHighlight() else skip:UnlockHighlight() end
+  if skip.glow then skip.glow:SetShown(on and true or false) end
+  U.skipLit = on and true or false
+end
 
 -- the Listen button: shown when Chronicle has lines for the current step, saying Stop while they play
 local function updateListen()
@@ -78,9 +103,16 @@ function U.create()
   local done = button(frame, "Done", 56, function() ns.core.markDone("manual") end)
   done:SetPoint("BOTTOMRIGHT", -8, 8)
   tip(done, "Done: you've done this step")
-  local skip = button(frame, "Skip", 56, function() ns.core.markDone("skipped") end)
+  skip = button(frame, "Skip", 56, function() ns.core.markDone("skipped") end)
   skip:SetPoint("RIGHT", done, "LEFT", -4, 0)
   tip(skip, "Skip: never show this step again")
+  skip.glow = skip:CreateTexture(nil, "OVERLAY")
+  skip.glow:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
+  skip.glow:SetBlendMode("ADD")
+  skip.glow:SetVertexColor(1, 0.5, 0)
+  skip.glow:SetPoint("TOPLEFT", -14, 12)
+  skip.glow:SetPoint("BOTTOMRIGHT", 14, -12)
+  skip.glow:Hide()
   local later = button(frame, "Later", 56, function() ns.core.later() end)
   later:SetPoint("RIGHT", skip, "LEFT", -4, 0)
   tip(later, "Skip for now: it comes back only once you've been 500+ yards from it and are within 200 yards again")
@@ -164,6 +196,8 @@ function U.refresh()
   title:SetText(("%s  |cffaaaaaastep %s / %d|r"):format(r.title, pos and tostring(pos) or "-", total or #r.steps))
   if not step then
     local more = ns.picker and #ns.picker.choices() > 0
+    lightSkip(false)
+    U.warned = nil
     stepText:SetText("Route finished." .. (more and "  |cffffd200Pick your next route: the Routes button.|r" or ""))
     nextText:SetText("")
     -- once per finished route: the picker opens by itself
@@ -174,7 +208,12 @@ function U.refresh()
   else
     -- a step the GPS took out of the route's order because it's right here
     -- or an escort's area still has quests to do (Core's escortWait)
-    stepText:SetText((via == "escort" and "|cffffd200Before the escort:|r " or via and "|cff40c0ffNearby:|r " or "") .. current(step) .. (step.lv and not via and ("  |cffaaaaaa(level %d after)|r"):format(step.lv) or ""))
+    local warn, alone = contested(step)
+    local busy = warn and ("\n|cffff8000Busy server? %s %s|r"):format(warn, alone and "If someone's already waiting, Skip it."
+      or "To drop just this quest, abandon it in your quest log (Skip would drop the whole step).") or ""
+    stepText:SetText((via == "escort" and "|cffffd200Before the escort:|r " or via and "|cff40c0ffNearby:|r " or "") .. current(step) .. (step.lv and not via and ("  |cffaaaaaa(level %d after)|r"):format(step.lv) or "") .. busy)
+    lightSkip(warn and alone)
+    U.warned = warn
     local nexts = {}
     for k = 1, 3 do
       local s = ns.core.peek(k)

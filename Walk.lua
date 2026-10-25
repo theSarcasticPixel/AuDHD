@@ -33,7 +33,28 @@ function W.mapCont(m) local t = ns.walkMaps and ns.walkMaps[m]; return t and t.c
 -- ------------------------------------------------------------------ the graph
 local graphs = {}
 local joinCities   -- below, with the cities
+-- WalkData has both sides' boats, zeppelins and flight masters: keep only the player's own side's (a Skyborne can be
+-- either), and the rides for one race only (the Skyborne portal) for that race. Once, when the game knows the side.
+local sided
+local function ownSide()
+  if sided then return end
+  local side = UnitFactionGroup and UnitFactionGroup("player")
+  if side ~= "Alliance" and side ~= "Horde" then return end
+  sided = true
+  local s = side == "Horde" and "h" or "a"
+  local name, race = UnitRace("player")
+  local function raceOk(r) return not r or ns.raceFits(r, race) or ns.raceFits(r, name) end
+  for _, d in pairs(ns.walkData or {}) do
+    local links, taxis = {}, {}
+    for _, L in ipairs(d.links or {}) do
+      if (not L.side or L.side:lower() == s) and raceOk(L.race) then links[#links + 1] = L end
+    end
+    for _, t in ipairs(d.taxis or {}) do if not t.s or t.s == s then taxis[#taxis + 1] = t end end
+    d.links, d.taxis = links, taxis
+  end
+end
 local function graph(cont)
+  ownSide()
   if graphs[cont] ~= nil then return graphs[cont] or nil end
   local d = ns.walkData and ns.walkData[cont]
   if not d then graphs[cont] = false return nil end
@@ -299,6 +320,7 @@ end
 -- dwarves and gnomes Ironforge, humans Stormwind): client TaxiNodes ids
 local RACE_TAXIS = { NightElf = { 27, 26 }, Human = { 2 }, Dwarf = { 6 }, Gnome = { 6 } }
 function W.knownTaxis()
+  ownSide()
   AuDHDDB.taxi = AuDHDDB.taxi or {}
   local k = (UnitName("player") or "?") .. "-" .. (GetRealmName and GetRealmName() or "?")
   if not AuDHDDB.taxiV2 then AuDHDDB.taxi, AuDHDDB.taxiV2 = {}, true end   -- open a flight map to learn yours again
@@ -535,6 +557,7 @@ function W.newPaths() live.key, live.path = nil, nil end
 -- called), else the flight the path planned.
 local flight
 local function taxiWhere(name, id)
+  ownSide()
   name = name and name:match("^([^,]+)")
   for c, d in pairs(ns.walkData or {}) do
     for _, t in ipairs(d.taxis or {}) do
