@@ -655,6 +655,17 @@ local CAVES = {
   ["Rethban Caverns"] = { m = 1433, door = { 14.5, 32.0 }, box = { 11, 17, 20, 31.5 } },
   ["Whelgar's Excavation"] = { m = 1437, door = { 38.2, 50.9 }, box = { 37.5, 41, 51.2, 55 } },
   ["Vul'Gol Ogre Mound"] = { m = 1431, door = { 34.6, 77.6 }, box = { 34, 39, 77.5, 86 } },
+  -- Horde (2026-10-25, from the guide's way in and where the mobs inside spawn; not yet seen in game)
+  ["Burning Blade Coven"] = { m = 1411, door = { 45.3, 56.3 }, box = { 42.2, 45.7, 51.9, 55.9 } },
+  ["Dustwind Cave"] = { m = 1411, door = { 53.2, 29.1 }, box = { 51.5, 53.7, 24.2, 29.5 } },
+  ["Skull Rock"] = { m = 1411, door = { 54.9, 9.6 }, box = { 51.2, 55.2, 7.4, 11.3 } },
+  ["Palemane Rock"] = { m = 1412, door = { 35.4, 65.0 }, box = { 31.5, 35.3, 62.8, 66.5 } },
+  ["Seer Wiserunner's cave"] = { m = 1412, door = { 34.9, 43.6 }, box = { 33.8, 34.7, 42.8, 43.8 } },
+  ["Venture Co. Mine"] = { m = 1412, door = { 58.4, 52.6 }, box = { 57.5, 62.2, 44.0, 52.4 } },
+  ["Night Web's Hollow"] = { m = 1420, door = { 26.8, 59.4 }, box = { 22.9, 26.65, 57.9, 61.0 } },
+  ["Deep Elem Mine"] = { m = 1421, door = { 56.5, 45.9 }, box = { 56.7, 59.2, 44.2, 46.2 } },
+  ["Dreadmist Den"] = { m = 1413, door = { 47.7, 19.2 }, box = { 47.85, 48.2, 18.85, 19.35 } },
+  ["Chol'aruk's cave"] = { m = 1413, door = { 58.1, 25.3 }, box = { 57.4, 58.2, 25.9, 27.8 } },
 }
 local function caveAt(m, x, y)
   for name, cv in pairs(CAVES) do
@@ -670,9 +681,13 @@ local function spawnSpots(mem)   -- a member's spawn points, in world coordinate
         local c, x, y = worldPos(g.m, g.p[k] / 100, g.p[k + 1] / 100)
         -- over: an outdoor spot (no ly) over a cave, which the arrow would lead you into the cave for (Shimmerweed on
         -- the hill over the Grizzled Den, the user 2026-10-17: "it is still sending me through the cave")
+        -- ly "any": each spot is in the cave whose box it's in, or outdoors (Searing Collars drop in Dustwind Cave, in
+        -- Skull Rock and at a camp outside)
+        local ly = mem.ly
+        if ly == "any" then ly = caveAt(g.m, g.p[k], g.p[k + 1]) or false end
         if c then
-          mem.ws[#mem.ws + 1] = { c = c, x = x, y = y, m = g.m, mx = g.p[k], my = g.p[k + 1], ly = mem.ly,
-            over = not mem.ly and caveAt(g.m, g.p[k], g.p[k + 1]) and true or nil }
+          mem.ws[#mem.ws + 1] = { c = c, x = x, y = y, m = g.m, mx = g.p[k], my = g.p[k + 1], ly = ly or nil,
+            over = mem.ly == nil and caveAt(g.m, g.p[k], g.p[k + 1]) and true or nil }
         end
       end
     end
@@ -840,6 +855,7 @@ local function targetCave(t)
   if ly == nil and t.mem then
     for _, mem in ipairs(t.mem) do if mem.ly then ly = mem.ly end end
   end
+  if ly == "any" then ly = t.m and t.x and caveAt(t.m, t.x, t.y) end
   return ly or nil
 end
 C.caves = CAVES

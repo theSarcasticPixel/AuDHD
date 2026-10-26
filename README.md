@@ -78,6 +78,9 @@ Hold **Shift** while talking to an NPC to pause all of these.
 - **Level 1 to 30 for every race**, any class. Alliance: Night Elf, Human, Dwarf and Gnome. Horde: Orc, Troll, Undead
   and Tauren. Skyborne on either side. Pick one with the Routes button; each route shows how long it takes, and only
   routes for your race and side are offered.
+- **Class routes** that fit your class quests in where they cost least: Hunter (Night Elf, Human, Dwarf, Orc, Troll,
+  Tauren), Warlock (Human, Gnome, Orc, Undead) and Shaman (Dwarf, Orc, Tauren). Hunter routes come in two kinds: pet
+  first (level 10 and your pet as soon as possible) or fastest to 30.
 - **One step at a time.** "Take this quest", "kill 8 of these", "hand that in". Progress counts update as you play.
 - **It knows where you are.** Your place comes from your quest log and what you've done, not from a counter. Reloads,
   disconnects and quests done out of order don't lose your place.
