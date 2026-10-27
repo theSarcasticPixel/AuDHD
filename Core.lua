@@ -235,6 +235,11 @@ function C.isDone(step, i)
   end
   if (step.k == "buyweapon" or step.k == "craft") and step.wp and hasItem(step.wp) then return true end
   if step.k == "discover" and step.taxi and ns.walk and ns.walk.knownTaxis()[step.taxi] then return true end
+  -- a few extra kills for XP (so a later quest isn't above you): done once you have the XP the plan has there
+  if step.k == "grind" and step.gl then
+    local L = UnitLevel("player") or 0
+    return L > step.gl or (L == step.gl and (UnitXP("player") or 0) >= (step.gx or 0))
+  end
   return false   -- train, bind, discover, buy, craft, run, grind: done by an event below or by you (Done)
 end
 
@@ -666,6 +671,10 @@ local CAVES = {
   ["Deep Elem Mine"] = { m = 1421, door = { 56.5, 45.9 }, box = { 56.7, 59.2, 44.2, 46.2 } },
   ["Dreadmist Den"] = { m = 1413, door = { 47.7, 19.2 }, box = { 47.85, 48.2, 18.85, 19.35 } },
   ["Chol'aruk's cave"] = { m = 1413, door = { 58.1, 25.3 }, box = { 57.4, 58.2, 25.9, 27.8 } },
+  -- druid class quests (2026-10-27, doors from the guide, boxes round the spots inside; not yet seen in game)
+  ["Moonkin Stone cave"] = { m = 1439, door = { 43.1, 45.6 }, box = { 43.3, 43.8, 45.75, 46.25 } },
+  ["Stormrage Barrow Dens"] = { m = 1450, door = { 72.15, 62.2 }, box = { 72.2, 75.7, 63.0, 67.8 } },
+  ["Ur'endra's cave"] = { m = 2521, door = { 54.3, 65.8 }, box = { 52.8, 54.1, 64.4, 65.5 } },
 }
 local function caveAt(m, x, y)
   for name, cv in pairs(CAVES) do
@@ -1801,7 +1810,10 @@ local events = {
     if ns.ui then C_Timer.After(0.5, ns.ui.refresh) end   -- the live objective counts
   end,
   PLAYER_LEVEL_UP = function() soon("level up") end,
-  PLAYER_XP_UPDATE = function() C.pet10Check() end,
+  PLAYER_XP_UPDATE = function()
+    C.pet10Check()
+    if currentKind() == "grind" then soon("xp") end   -- an extra-kills step ticks off at its XP
+  end,
   PLAYER_DEAD = function() soon("died") end,
   PLAYER_ALIVE = function() soon("alive") end,
   PLAYER_UNGHOST = function() soon("resurrected") end,
@@ -2069,6 +2081,8 @@ SlashCmdList.AUDHD = function(input)
     say(ns.heal.command(rest))
   elseif cmd == "fish" and ns.fishing then
     say(ns.fishing.command(rest))
+  elseif cmd == "atlas" and ns.atlas then
+    say(ns.atlas.command(rest))
   elseif cmd == "bigmap" and ns.bigmap then
     local r = ns.bigmap.command(rest)
     if r then say(r) end
@@ -2095,6 +2109,6 @@ SlashCmdList.AUDHD = function(input)
     C.advance("route")
     say("route reset to step 1 (steps you've done are skipped again)")
   else
-    say("/wfn (show/hide), /wfn note <text>, /wfn done, /wfn later, /wfn back, /wfn goto <n>, /wfn route [name], /wfn routes, /wfn settings, /wfn minimap on|off, /wfn auto, /wfn ammo [off|<count>], /wfn arrow, /wfn map on|off, /wfn threat on|off, /wfn rares all|route|off, /wfn perf, /wfn spec [name], /wfn imbue [off|on], /wfn shards [off|on|max <n>|low <n>|lock|unlock|reset], /wfn heal [on|off|setup], /wfn fish [on|off|right|middle|4|5|status|loud on|off|volume <10-100>|lure on|off|zone on|off|map on|off], /wfn bigmap [on|off|replace on|off], /wfn buffs [off|on], /wfn announce [off|on], /wfn askbuffs [off|on], /wfn blocked, /wfn unblock, /wfn log, /wfn reset")
+    say("/wfn (show/hide), /wfn note <text>, /wfn done, /wfn later, /wfn back, /wfn goto <n>, /wfn route [name], /wfn routes, /wfn settings, /wfn minimap on|off, /wfn auto, /wfn ammo [off|<count>], /wfn arrow, /wfn map on|off, /wfn threat on|off, /wfn rares all|route|off, /wfn perf, /wfn spec [name], /wfn imbue [off|on], /wfn shards [off|on|max <n>|low <n>|lock|unlock|reset], /wfn heal [on|off|setup], /wfn fish [on|off|right|middle|4|5|status|loud on|off|volume <10-100>|lure on|off|zone on|off|map on|off], /wfn bigmap [on|off|replace on|off], /wfn atlas on|off (work in progress), /wfn buffs [off|on], /wfn announce [off|on], /wfn askbuffs [off|on], /wfn blocked, /wfn unblock, /wfn log, /wfn reset")
   end
 end

@@ -270,6 +270,7 @@ local function questIcon(t, s)
   t:SetVertexColor(1, 1, 1, grey and 0.75 or 1)
   return true
 end
+ns.questIcon = questIcon   -- the world map has them too (RouteMap.lua)
 local function tipFor(f)
   if f.SetMouseClickEnabled then f:SetMouseClickEnabled(false) f:SetMouseMotionEnabled(true) else f:EnableMouse(true) end
   f:SetScript("OnEnter", function(self)
@@ -498,6 +499,7 @@ local function guardFlag()
     m = mi and mi.parentMapID
   end
 end
+ns.guardFlag = guardFlag
 local function drawPoi(c)
   local m, x, y, name, texIndex = guardFlag()
   local pc, X, Y

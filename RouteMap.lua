@@ -49,8 +49,15 @@ local function onMap(step, mapID)
   return x, y
 end
 
+-- a frame for a map: made without a parent, then put there (the gamepad UI's navigation watches frames made inside an
+-- open window, and one made there from our code blocks its next close)
+local function onFrame(parent)
+  local f = ns.newFrame("RouteMap", "Frame")
+  f:SetParent(parent)
+  return f
+end
 local function newPin(parent, size)
-  local f = ns.newFrame("RouteMap", "Frame", nil, parent)
+  local f = onFrame(parent)
   f:SetSize(size, size)
   f.dot = f:CreateTexture(nil, "ARTWORK")
   f.dot:SetAllPoints()
@@ -134,8 +141,36 @@ local function above(cv)
       if l and l > top then top = l end
     end
   end
+  -- (the joined-up map's art is a frame on the canvas with its layers above it: Atlas.lua)
+  if ns.atlas and ns.atlas.top() > top then top = ns.atlas.top() end
   return math.min(top, 9000)
 end
+-- where things go: 0..1 of the map underneath. With the joined-up map showing, everything in view counts, the parts
+-- in its neighbours too (Atlas.lua: the map underneath is only the zone in the middle); else what's on the map itself.
+-- at(m, x, y[, any]): a map spot (0..100), nil when out of view (any: anywhere); yards(c, X, Y): world yards;
+-- inView(x, y)
+local function placer(mapID)
+  local P = {}
+  local x0, y0, x1, y1
+  if ns.atlas and ns.atlas.shown() then x0, y0, x1, y1 = ns.atlas.viewOnHost(0.1) end
+  if x0 then
+    P.wide = true
+    function P.inView(x, y) return x and y and x >= x0 and x <= x1 and y >= y0 and y <= y1 or false end
+    function P.yards(c, X, Y) return ns.atlas.yardsToHost(c, X, Y) end
+    function P.at(m, x, y, any)
+      if not (ns.walk and m and x and y) then return nil end
+      local c, X, Y = ns.walk.toWorld(m, x, y)
+      local fx, fy = ns.atlas.yardsToHost(c, X, Y)
+      if fx and (any or P.inView(fx, fy)) then return fx, fy end
+    end
+  else
+    function P.inView(x, y) return x and y and x >= -0.05 and x <= 1.05 and y >= -0.05 and y <= 1.05 or false end
+    function P.yards(_, X, Y) if ns.walk and ns.walk.toMap(mapID, 0, 0) then return ns.walk.toMap(mapID, X, Y) end end
+    function P.at(m, x, y) if m and x and y then return onMap({ m = m, x = x, y = y }, mapID) end end
+  end
+  return P
+end
+R.placer = placer
 function R.drawWorld()
   for _, p in ipairs(worldPins) do p:Hide() end
   for _, l in ipairs(lines) do l:Hide() end
@@ -146,7 +181,8 @@ function R.drawWorld()
   local w, h = cv:GetWidth(), cv:GetHeight()
   if not w or w <= 0 then return end
   local scale = cv:GetScale() or 1
-  if not lineFrame then lineFrame = ns.newFrame("RouteMap", "Frame", nil, cv); ours[lineFrame] = true end
+  if not lineFrame then lineFrame = onFrame(cv); ours[lineFrame] = true end
+  local P = placer(mapID)
   local base = above(cv)
   lineFrame:SetParent(cv)
   lineFrame:SetAllPoints(cv)
@@ -164,14 +200,15 @@ function R.drawWorld()
     l:SetEndPoint("TOPLEFT", cv, x2 * w, -y2 * h)
     l:Show()
   end
-  -- a walking path (Walk.lua: world yards) on this map, from point k on; false if this map has no transform
-  local function pathLine(pts, k, r, g, b, a)
-    if not (ns.walk and ns.walk.toMap(mapID, 0, 0)) then return false end
+  -- a walking path (Walk.lua: { c, pts } in world yards) on this map, from point k on; false if it can't be placed
+  local function pathLine(p, k, r, g, b, a)
+    local pts = p.pts
+    if not P.yards(p.c, pts[k or 1] or pts[(k or 1) + 2], pts[(k or 1) + 1] or pts[(k or 1) + 3]) then return false end
     local px, py
     for i = k or 1, #pts - 1, 2 do
       if pts[i] then
-        local x, y = ns.walk.toMap(mapID, pts[i], pts[i + 1])
-        if px and not ((px < -0.05 or px > 1.05 or py < -0.05 or py > 1.05) and (x < -0.05 or x > 1.05 or y < -0.05 or y > 1.05)) then
+        local x, y = P.yards(p.c, pts[i], pts[i + 1])
+        if px and x and (P.inView(px, py) or P.inView(x, y)) then
           line(px, py, x, y, r, g, b, a)
         end
         px, py = x, y
@@ -184,13 +221,13 @@ function R.drawWorld()
   local groups = {}
   local list = ahead(WORLD_STEPS)
   for i, e in ipairs(list) do
-    local x, y = onMap(e.step, mapID)
+    local x, y = P.at(e.step.m, e.step.x, e.step.y)
     local before = list[i - 1]
     if i > 1 and not (x and placed[#placed] and placed[#placed].n == e.n - 1) then
       -- one end is off this map: the walking way between them still crosses it (no straight line: we don't know where)
       local p = ns.walk and ns.walk.path(before.step.m, before.step.x, before.step.y, e.step.m, e.step.x, e.step.y)
       local c = colourOf(e.step)
-      if p then pathLine(p.pts, 1, c[1], c[2], c[3], 0.85) end
+      if p then pathLine(p, 1, c[1], c[2], c[3], 0.85) end
     end
     if x then
       local g = stack(groups, e, x * w, y * h, size)
@@ -199,7 +236,7 @@ function R.drawWorld()
         -- the walking way between the two steps, else a straight line
         local p = ns.walk and ns.walk.path(prev.step.m, prev.step.x, prev.step.y, e.step.m, e.step.x, e.step.y)
         local c = colourOf(e.step)
-        if not (p and pathLine(p.pts, 1, c[1], c[2], c[3], 0.85)) then line(prev.x, prev.y, g.px / w, g.py / h, c[1], c[2], c[3], 0.85) end
+        if not (p and pathLine(p, 1, c[1], c[2], c[3], 0.85)) then line(prev.x, prev.y, g.px / w, g.py / h, c[1], c[2], c[3], 0.85) end
       end
       placed[#placed + 1] = { n = e.n, x = g.px / w, y = g.py / h, g = g, step = e.step }
     end
@@ -223,7 +260,7 @@ function R.drawWorld()
   local pos = target and m and not isSecret(m) and C_Map.GetPlayerMapPosition(m, "player")
   if pos then
     local px, py = pos:GetXY()
-    local sx, sy = onMap({ m = m, x = px * 100, y = py * 100 }, mapID)
+    local sx, sy = P.at(m, px * 100, py * 100, true)
     -- the walking way from you (the part of it ahead of you), else a straight line
     local p = ns.walk and ns.walk.toStep(target)
     local tc = colourOf(target)
@@ -231,10 +268,10 @@ function R.drawWorld()
     if p and sx then
       local k = p.at or 1
       if not p.pts[k] then k = k + 2 end
-      local x, y = ns.walk.toMap(mapID, p.pts[k], p.pts[k + 1])
+      local x, y = P.yards(p.c, p.pts[k], p.pts[k + 1])
       -- you to the path's start: in the air, a faint line to where your flight lands
       if x then line(sx, sy, x, y, tc[1], tc[2], tc[3], ns.walk.flying and ns.walk.flying() and 0.35 or 0.9) end
-      drawn = pathLine(p.pts, k, tc[1], tc[2], tc[3], 0.9)
+      drawn = pathLine(p, k, tc[1], tc[2], tc[3], 0.9)
     end
     if sx and not drawn and first and first.n == 1 then line(sx, sy, first.x, first.y, tc[1], tc[2], tc[3], 0.9) end
   end
@@ -257,7 +294,8 @@ function R.drawSpawnsWorld()
   local w, h = cv:GetWidth(), cv:GetHeight()
   if not w or w <= 0 then return end
   local scale = cv:GetScale() or 1
-  if not spawnFrame then spawnFrame = ns.newFrame("RouteMap", "Frame", nil, cv); ours[spawnFrame] = true end
+  if not spawnFrame then spawnFrame = onFrame(cv); ours[spawnFrame] = true end
+  local P = placer(mapID)
   spawnFrame:SetParent(cv)
   spawnFrame:SetAllPoints(cv)
   spawnFrame:SetFrameLevel(above(cv) + 25)
@@ -266,17 +304,21 @@ function R.drawSpawnsWorld()
   for mi, mem in ipairs(members(ns.core.current())) do
     local c = ns.PALETTE[(mi - 1) % #ns.PALETTE + 1]
     for _, group in ipairs(mem.sp or {}) do
-      if group.m == mapID then
+      if P.wide or group.m == mapID then
         local p = group.p
         local sz = group.o and size * 0.65 or size   -- objects you pick up: smaller dots
         for k = 1, #p - 1, 2 do
+          local x, y = p[k] / 100, p[k + 1] / 100
+          if P.wide then x, y = P.at(group.m, p[k], p[k + 1]) end
+          if x then
           nSpawn = nSpawn + 1
           local t = spawnDot(spawnFrame, nSpawn)
           t:SetSize(sz, sz)
           t:SetVertexColor(c[1], c[2], c[3], 0.95)
           t:ClearAllPoints()
-          t:SetPoint("CENTER", cv, "TOPLEFT", p[k] / 100 * w, -p[k + 1] / 100 * h)
+          t:SetPoint("CENTER", cv, "TOPLEFT", x * w, -y * h)
           t:Show()
+          end
         end
       end
     end
@@ -302,6 +344,22 @@ local function rareTip(self)
   GameTooltip:AddLine("A spawn point: it may not be up", 0.6, 0.6, 0.6)
   GameTooltip:Show()
 end
+-- (the joined-up map: every rare in the world is looked at, so each spawn point is turned into world yards once)
+local rareYards = setmetatable({}, { __mode = "k" })
+local function rareAt(P, g, k)
+  local yd = rareYards[g]
+  if not yd then
+    yd = {}
+    for i = 1, #g.p - 1, 2 do
+      local c, X, Y = ns.walk.toWorld(g.m, g.p[i], g.p[i + 1])
+      yd[i], yd[i + 1], yd.c = X or false, Y or false, yd.c or c
+    end
+    rareYards[g] = yd
+  end
+  if not (yd.c and yd[k]) then return nil end
+  local x, y = P.yards(yd.c, yd[k], yd[k + 1])
+  if P.inView(x, y) then return x, y end
+end
 function R.drawRaresWorld()
   for _, p in ipairs(rarePins) do p:Hide() end
   if not (WorldMapFrame and WorldMapFrame:IsShown()) or AuDHDDB.mapHidden or AuDHDDB.rares == "off" or not ns.rareData then return end
@@ -313,18 +371,22 @@ function R.drawRaresWorld()
   local scale = cv:GetScale() or 1
   local route = ns.core.route()
   local level = (spawnFrame and spawnFrame:GetFrameLevel() or above(cv)) - 2
+  local P = placer(mapID)
   local n = 0
   for npc, r in pairs(ns.rareData) do
     local w8 = route and route.rares and route.rares[npc]
     local needed = w8 and not C_QuestLog.IsQuestFlaggedCompleted(w8.q)
     if needed or AuDHDDB.rares ~= "route" then
       for _, g in ipairs(r.sp) do
-        if g.m == mapID then
+        if P.wide or g.m == mapID then
           for k = 1, #g.p - 1, 2 do
+          local x, y = g.p[k] / 100, g.p[k + 1] / 100
+          if P.wide then x, y = rareAt(P, g, k) end
+          if x then
             n = n + 1
             local pin = rarePins[n]
             if not pin then
-              pin = ns.newFrame("RouteMap", "Frame", nil, cv)
+              pin = onFrame(cv)
               pin.tex = pin:CreateTexture(nil, "ARTWORK")
               pin.tex:SetAllPoints()
               pin.tex:SetTexture("Interface\\TargetingFrame\\UI-RaidTargetingIcon_8")
@@ -342,14 +404,176 @@ function R.drawRaresWorld()
             pin.tex:SetVertexColor(1, needed and 0.35 or 1, needed and 0.35 or 1)
             pin.rare = npc
             pin:ClearAllPoints()
-            pin:SetPoint("CENTER", cv, "TOPLEFT", g.p[k] / 100 * w, -g.p[k + 1] / 100 * h)
+            pin:SetPoint("CENTER", cv, "TOPLEFT", x * w, -y * h)
             pin:Show()
+          end
           end
         end
       end
     end
   end
 end
+
+-- ------------------------------------------------------------------ the rest, as on the detailed map
+-- (BigMap.lua): the route's later pick-ups and hand-ins as the game's ! and ? (small, past the numbered steps), the
+-- hand-ins of finished quests in your log the route doesn't hand in itself, and the place a guard told you the way to.
+-- With the joined-up map also your party or raid where the game's own dots don't reach: it draws them on the map
+-- underneath only, so a friend in the next zone over would be missing.
+local marks, mates, flag, extraFrame = {}, {}, {}, nil
+local aheadAt, later = -10, {}
+local shown = { marks = 0, log = 0, mates = 0, flag = 0 }
+local edgeOf = setmetatable({}, { __mode = "k" })   -- a party dot -> its black edge
+local function hoverPin(list, i, parent)
+  local f = list[i]
+  if f then return f end
+  f = onFrame(parent)
+  f.icon = f:CreateTexture(nil, "OVERLAY")
+  f.icon:SetAllPoints(f)
+  -- hover only: clicks go through to the map (and no click script: the gamepad UI takes a frame with one for a button)
+  f:EnableMouse(true)
+  if f.SetMouseClickEnabled then f:SetMouseClickEnabled(false) end
+  f:SetScript("OnEnter", function(self)
+    if not (GameTooltip and (self.tip or self.unit)) then return end
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    if self.unit then GameTooltip:SetUnit(self.unit) else GameTooltip:SetText(self.tip, 1, 1, 1, 1, true) end
+    GameTooltip:Show()
+  end)
+  f:SetScript("OnLeave", function() if GameTooltip then GameTooltip:Hide() end end)
+  list[i] = f
+  ours[f] = true
+  return f
+end
+-- the unit's map is the one underneath or inside it: the game draws its own dot there
+local function under(m, host)
+  for _ = 1, 5 do
+    if not m then return false end
+    if m == host then return true end
+    local mi = C_Map.GetMapInfo and C_Map.GetMapInfo(m)
+    m = mi and mi.parentMapID
+  end
+  return false
+end
+function R.drawExtrasWorld()
+  for _, f in ipairs(marks) do f:Hide() end
+  for _, f in ipairs(mates) do f:Hide() end
+  for _, f in ipairs(flag) do f:Hide() end
+  shown.marks, shown.log, shown.mates, shown.flag = 0, 0, 0, 0
+  if not (WorldMapFrame and WorldMapFrame:IsShown()) or AuDHDDB.mapHidden then return end
+  local cv = canvas()
+  local mapID = WorldMapFrame:GetMapID()
+  if not (cv and mapID) then return end
+  local w, h = cv:GetWidth(), cv:GetHeight()
+  if not w or w <= 0 then return end
+  local scale = cv:GetScale() or 1
+  if not extraFrame then extraFrame = onFrame(cv); ours[extraFrame] = true end
+  extraFrame:SetParent(cv)
+  extraFrame:SetAllPoints(cv)
+  extraFrame:SetFrameLevel(above(cv) + 22)   -- over the route's lines, under its numbered pins
+  extraFrame:Show()
+  local P = placer(mapID)
+  local function put(list, i, x, y, size, level)
+    local f = hoverPin(list, i, extraFrame)
+    f:SetSize(size / scale, size / scale)
+    f:SetFrameLevel(extraFrame:GetFrameLevel() + (level or 1))
+    f:ClearAllPoints()
+    f:SetPoint("CENTER", cv, "TOPLEFT", x * w, -y * h)
+    f.tip, f.unit = nil, nil
+    f:SetAlpha(1)
+    f:Show()
+    return f
+  end
+  local n = 0
+  if ns.questIcon and ns.core.ahead then
+    local numbered = {}
+    for _, e in ipairs(ahead(WORLD_STEPS)) do numbered[e.step] = true end
+    local now = GetTime()
+    if now - aheadAt > 3 then aheadAt = now later = ns.core.ahead() or {} end
+    local handed = {}
+    for _, s in ipairs(later) do
+      if s.k == "turnin" and s.q then handed[s.q] = true end
+      if n < 200 and not numbered[s] and (s.k == "accept" or s.k == "turnin") then
+        local x, y = P.at(s.m, s.x, s.y)
+        if x then
+          n = n + 1
+          local f = put(marks, n, x, y, 14)
+          f.tip = s.t
+          ns.questIcon(f.icon, s)
+          f:SetAlpha(0.85)
+          shown.marks = shown.marks + 1
+        end
+      end
+    end
+    local ends = (ns.core.route() or {}).ends or {}
+    local ok, count = pcall(C_QuestLog.GetNumQuestLogEntries)
+    for li = 1, (ok and count or 0) do
+      local info = C_QuestLog.GetInfo(li)
+      local q = info and not info.isHeader and info.questID
+      local e = q and ends[q]
+      if e and e.m and n < 200 and not handed[q] and ns.core.readyToHandIn and ns.core.readyToHandIn(q) then
+        local x, y = P.at(e.m, e.x, e.y)
+        if x then
+          n = n + 1
+          local f = put(marks, n, x, y, 16, 2)
+          f.tip = ("Turn in %s to %s"):format(e.t or "?", e.n or "?")
+          ns.questIcon(f.icon, { k = "turnin", q = q })
+          shown.log = shown.log + 1
+        end
+      end
+    end
+  end
+  -- the guard's flag: the game's own icon (its minimap icon sheet), a gold square if this client can't say which
+  local m, gx, gy, name, texIndex
+  if ns.guardFlag then m, gx, gy, name, texIndex = ns.guardFlag() end
+  local fx, fy = P.at(m, gx, gy)
+  if fx then
+    local f = put(flag, 1, fx, fy, 20, 3)
+    f.tip = name
+    local coords = texIndex and ((C_Minimap and C_Minimap.GetPOITextureCoords and { C_Minimap.GetPOITextureCoords(texIndex) })
+      or (GetPOITextureCoords and { GetPOITextureCoords(texIndex) }))
+    if coords and coords[4] then
+      f.icon:SetTexture("Interface\\Minimap\\POIIcons")
+      f.icon:SetTexCoord(coords[1], coords[2], coords[3], coords[4])
+    else
+      f.icon:SetColorTexture(1, 0.82, 0, 1)
+    end
+    shown.flag = 1
+  end
+  -- party or raid beyond the map underneath (joined-up map only): a class-coloured dot each, hover for who
+  if P.wide then
+    local raid = IsInRaid and IsInRaid()
+    local count = GetNumGroupMembers and GetNumGroupMembers() or 0
+    for i = 1, raid and count or count - 1 do
+      local u = (raid and "raid" or "party") .. i
+      if UnitExists(u) and not (UnitIsUnit and UnitIsUnit(u, "player")) and not (UnitIsConnected and not UnitIsConnected(u)) then
+        local um = C_Map.GetBestMapForUnit(u)
+        local pos = um and not isSecret(um) and not under(um, mapID) and C_Map.GetPlayerMapPosition(um, u)
+        local ux, uy
+        if pos then ux, uy = pos:GetXY() end
+        local x, y
+        if ux and not isSecret(ux) then x, y = P.at(um, ux * 100, uy * 100) end
+        if x then
+          shown.mates = shown.mates + 1
+          local f = put(mates, shown.mates, x, y, 14, 4)
+          local edge = edgeOf[f]
+          if not edge then
+            f.icon:SetTexture("Interface\\AddOns\\AuDHD\\SoftOval")
+            edge = f:CreateTexture(nil, "BORDER")
+            edgeOf[f] = edge
+            edge:SetPoint("CENTER")
+            edge:SetTexture("Interface\\AddOns\\AuDHD\\SoftOval")
+            edge:SetVertexColor(0, 0, 0, 0.9)
+          end
+          edge:SetSize(20 / scale, 20 / scale)
+          local _, class = UnitClass(u)
+          local col = class and RAID_CLASS_COLORS and RAID_CLASS_COLORS[class]
+          f.icon:SetVertexColor(col and col.r or 1, col and col.g or 1, col and col.b or 1, 1)
+          f.unit = u
+        end
+      end
+    end
+  end
+end
+function R.extrasShown() return shown end
 
 -- ------------------------------------------------------------------ minimap
 local miniPins, miniTrail, TRAIL_STEP = {}, {}, 12
@@ -528,21 +752,21 @@ R.safe = safe
 function R.refresh()
   safe(R.drawWorld, "drawWorld")
   safe(R.drawSpawnsWorld, "drawSpawnsWorld")
-  safe(R.drawRaresWorld, "drawRaresWorld")
+  safe(R.drawRaresWorld, "drawRaresWorld"); safe(R.drawExtrasWorld, "drawExtrasWorld")
   safe(R.drawMinimap, "drawMinimap")
   safe(R.drawSpawnsMinimap, "drawSpawnsMinimap")
 end
 
 function R.enable()
   if WorldMapFrame then
-    WorldMapFrame:HookScript("OnShow", function() safe(R.drawWorld, "drawWorld"); safe(R.drawSpawnsWorld, "drawSpawnsWorld"); safe(R.drawRaresWorld, "drawRaresWorld") end)
+    WorldMapFrame:HookScript("OnShow", function() safe(R.drawWorld, "drawWorld"); safe(R.drawSpawnsWorld, "drawSpawnsWorld"); safe(R.drawRaresWorld, "drawRaresWorld"); safe(R.drawExtrasWorld, "drawExtrasWorld") end)
     if WorldMapFrame.OnMapChanged then
-      hooksecurefunc(WorldMapFrame, "OnMapChanged", function() safe(R.drawWorld, "drawWorld"); safe(R.drawSpawnsWorld, "drawSpawnsWorld"); safe(R.drawRaresWorld, "drawRaresWorld") end)
+      hooksecurefunc(WorldMapFrame, "OnMapChanged", function() safe(R.drawWorld, "drawWorld"); safe(R.drawSpawnsWorld, "drawSpawnsWorld"); safe(R.drawRaresWorld, "drawRaresWorld"); safe(R.drawExtrasWorld, "drawExtrasWorld") end)
     end
   end
   -- the minimap follows you; the world map follows your position (the line from you) and its zoom
   C_Timer.NewTicker(0.2, function() safe(R.drawMinimap, "drawMinimap"); safe(R.drawSpawnsMinimap, "drawSpawnsMinimap") end)
   C_Timer.NewTicker(0.5, function()
-    if WorldMapFrame and WorldMapFrame:IsShown() then safe(R.drawWorld, "drawWorld"); safe(R.drawSpawnsWorld, "drawSpawnsWorld"); safe(R.drawRaresWorld, "drawRaresWorld") end
+    if WorldMapFrame and WorldMapFrame:IsShown() then safe(R.drawWorld, "drawWorld"); safe(R.drawSpawnsWorld, "drawSpawnsWorld"); safe(R.drawRaresWorld, "drawRaresWorld"); safe(R.drawExtrasWorld, "drawExtrasWorld") end
   end)
 end

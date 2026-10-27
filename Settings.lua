@@ -35,6 +35,9 @@ local TABS = {
       function(on) AuDHDDB.minimap = AuDHDDB.minimap or { angle = 200 }; AuDHDDB.minimap.hide = not on or nil
         if ns.minimap then ns.minimap.apply() end end, "Off: /wfn minimap brings it back" },
     { "Maps" },
+    { "Joined-up world map (work in progress)", function() return ns.atlas and ns.atlas.isOn() end,
+      function(on) if ns.atlas then print("AuDHD: " .. ns.atlas.command(on and "on" or "off")) end end,
+      "The game's world map with every zone's painting joined into one: zoom from the whole world down to the minimap's pictures with the wheel, drag past a map's edge into the next. The quest log and everything else on the map stay.\n\n|cffff9933Work in progress: not tested in game yet.|r It may show errors or look wrong; untick this (or /wfn atlas off) to go back to the normal map." },
     { "Detailed map (the minimap's pictures)", function() return ns.bigmap and ns.bigmap.isOn() end,
       function(on) if ns.bigmap then ns.bigmap.set(on) end end,
       "A big map of the open world drawn from the game's own minimap pictures, with you and your route on it. Open it with /wfn bigmap or a key in Key Bindings (AuDHD: Detailed map). Drag to move around, scroll to zoom" },

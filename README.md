@@ -79,8 +79,9 @@ Hold **Shift** while talking to an NPC to pause all of these.
   and Tauren. Skyborne on either side. Pick one with the Routes button; each route shows how long it takes, and only
   routes for your race and side are offered.
 - **Class routes** that fit your class quests in where they cost least: Hunter (Night Elf, Human, Dwarf, Orc, Troll,
-  Tauren), Warlock (Human, Gnome, Orc, Undead) and Shaman (Dwarf, Orc, Tauren). Hunter routes come in two kinds: pet
-  first (level 10 and your pet as soon as possible) or fastest to 30.
+  Tauren), Warlock (Human, Gnome, Orc, Undead), Shaman (Dwarf, Orc, Troll, Tauren) and Druid (Night Elf, Tauren,
+  Skyborne on either side). Hunter routes come in two kinds: pet first (level 10 and your pet as soon as possible) or
+  fastest to 30.
 - **One step at a time.** "Take this quest", "kill 8 of these", "hand that in". Progress counts update as you play.
 - **It knows where you are.** Your place comes from your quest log and what you've done, not from a counter. Reloads,
   disconnects and quests done out of order don't lose your place.
@@ -137,6 +138,9 @@ A big map of the whole open world, both continents side by side, drawn from the 
 - **Drag to move around**, or **Center on me** to follow you again.
 - Open it with `/audhd bigmap` or a key (Key Bindings → AuDHD → Detailed map). It can also take over your world map key,
   with a button to the game's own map. Off until you switch it on in the settings.
+- **Joined-up world map (work in progress, not yet tried in game).** The game's own world map with every zone's
+  painting joined into one, quest log and all: zoom from the whole world down to the minimap's pictures, drag past a
+  map's edge into the next. Off unless you tick it in the settings' Maps tab.
 
 ## Settings
 
