@@ -33,6 +33,7 @@ function W.mapCont(m) local t = ns.walkMaps and ns.walkMaps[m]; return t and t.c
 -- ------------------------------------------------------------------ the graph
 local graphs = {}
 local joinCities   -- below, with the cities
+local ground       -- below, with the smoothing
 -- WalkData has both sides' boats, zeppelins and flight masters: keep only the player's own side's (a Skyborne can be
 -- either), and the rides for one race only (the Skyborne portal) for that race. Once, when the game knows the side.
 local sided
@@ -53,12 +54,122 @@ local function ownSide()
     d.links, d.taxis = links, taxis
   end
 end
+-- ------------------------------------------------------------------ smoothing
+-- The graph is thin (about 3 links a node, ~57 yd apart): its way between two spots 200-700 yd apart was a median 1.47x
+-- the straight line, in arcs (the user, 2026-10-28: "randomly telling you to walk in a large arc rather than just
+-- straight"). Slopes weren't the cause (not weighing steep links changed it to 1.45x). So the way found is pulled
+-- straight where the line stays on known ground: every 8 yd of it within SMOOTH_R yd of a dry, gentle link (water,
+-- deep water and steep links don't count, so lakes and cliffs still bend it). Ledges and rides are kept. Offline
+-- (scratchpad smoothcheck2.mjs) that took the median to ~1.17x.
+local ECELL, SMOOTH_R, SMOOTH_MAX, SMOOTH_BUDGET, SMOOTH_HOPS = 64, 40, 400, 20000, 30
+local function eKey(X, Y) return floor((X + 32768) / ECELL) * 4096 + floor((Y + 32768) / ECELL) end
+-- a dry, gentle link into the ground grid (the cells along it)
+ground = function(G, i, j, len)
+  local eg = G.eg
+  local n = math.max(1, math.ceil(len / 16))
+  local last
+  for k = 0, n do
+    local key = eKey(G.X[i] + (G.X[j] - G.X[i]) * k / n, G.Y[i] + (G.Y[j] - G.Y[i]) * k / n)
+    if key ~= last then
+      local cell = eg[key]
+      if not cell then cell = {}; eg[key] = cell end
+      cell[#cell + 1] = i
+      cell[#cell + 1] = j
+      last = key
+    end
+  end
+end
+local function onGround(G, x, y, memo)
+  local mk = floor(x / 8) * 65536 + floor(y / 8)
+  local m = memo[mk]
+  if m ~= nil then return m end
+  local cx, cy = floor((x + 32768) / ECELL), floor((y + 32768) / ECELL)
+  local X, Y, r2 = G.X, G.Y, SMOOTH_R * SMOOTH_R
+  local ok = false
+  for dx = -1, 1 do
+    for dy = -1, 1 do
+      local cell = G.eg[(cx + dx) * 4096 + cy + dy]
+      if cell then
+        for k = 1, #cell, 2 do
+          local ax, ay, bx, by = X[cell[k]], Y[cell[k]], X[cell[k + 1]], Y[cell[k + 1]]
+          local ex, ey = bx - ax, by - ay
+          local l2 = ex * ex + ey * ey
+          local t = l2 > 0 and ((x - ax) * ex + (y - ay) * ey) / l2 or 0
+          if t < 0 then t = 0 elseif t > 1 then t = 1 end
+          local qx, qy = x - ax - t * ex, y - ay - t * ey
+          if qx * qx + qy * qy <= r2 then ok = true break end
+        end
+      end
+      if ok then break end
+    end
+    if ok then break end
+  end
+  memo[mk] = ok
+  return ok
+end
+-- yards from x, y to the segment a-b
+local function toSeg(x, y, ax, ay, bx, by)
+  local ex, ey = bx - ax, by - ay
+  local l2 = ex * ex + ey * ey
+  local t = l2 > 0 and ((x - ax) * ex + (y - ay) * ey) / l2 or 0
+  if t < 0 then t = 0 elseif t > 1 then t = 1 end
+  return sqrt((x - ax - t * ex) ^ 2 + (y - ay - t * ey) ^ 2)
+end
+local CUT_NEAR = 15   -- a straight line this close to a stretch you blocked (/wfn blocked) isn't taken
+local function clearLine(G, ax, ay, bx, by, memo, budget)
+  local n = math.max(1, math.ceil(sqrt((bx - ax) ^ 2 + (by - ay) ^ 2) / 8))
+  local cuts = G.cuts
+  for k = 1, n - 1 do
+    budget.n = budget.n + 1
+    local x, y = ax + (bx - ax) * k / n, ay + (by - ay) * k / n
+    if not onGround(G, x, y, memo) then return false end
+    if cuts then
+      for q = 1, #cuts do
+        local c = cuts[q]
+        if toSeg(x, y, c[1], c[2], c[3], c[4]) <= CUT_NEAR then return false end
+      end
+    end
+  end
+  return true
+end
+-- pts (X, Y pairs; false, false at a ride) pulled straight; fixed[point] = a point that stays (a ledge)
+local function smoothPts(G, pts, fixed)
+  if not G.eg then return pts end
+  local memo, budget = {}, { n = 0 }
+  local np = #pts / 2
+  local out = { pts[1], pts[2] }
+  local i = 1
+  while i < np do
+    local j = i + 1
+    if pts[2 * i - 1] and pts[2 * i + 1] then
+      -- the furthest point ahead with no ride or fixed point before it
+      local last = i + 1
+      while last < np and pts[2 * last + 1] and not fixed[last] and last - i < SMOOTH_HOPS do last = last + 1 end
+      for k = last, i + 2, -1 do
+        if budget.n > SMOOTH_BUDGET then break end
+        local ax, ay, bx, by = pts[2 * i - 1], pts[2 * i], pts[2 * k - 1], pts[2 * k]
+        if (bx - ax) ^ 2 + (by - ay) ^ 2 <= SMOOTH_MAX * SMOOTH_MAX and clearLine(G, ax, ay, bx, by, memo, budget) then j = k break end
+      end
+    end
+    out[#out + 1], out[#out + 2] = pts[2 * j - 1], pts[2 * j]
+    i = j
+  end
+  return out
+end
+local function walkLen(pts)
+  local len = 0
+  for k = 1, #pts - 3, 2 do
+    if pts[k] and pts[k + 2] then len = len + sqrt((pts[k + 2] - pts[k]) ^ 2 + (pts[k + 3] - pts[k + 1]) ^ 2) end
+  end
+  return len
+end
+
 local function graph(cont)
   ownSide()
   if graphs[cont] ~= nil then return graphs[cont] or nil end
   local d = ns.walkData and ns.walkData[cont]
   if not d then graphs[cont] = false return nil end
-  local G = { X = {}, Y = {}, adj = {}, cost = {}, grid = {}, ledge = {} }
+  local G = { X = {}, Y = {}, adj = {}, cost = {}, grid = {}, ledge = {}, eg = {} }
   local nodes, n = d.nodes, floor(#d.nodes / 7)
   for i = 1, n do
     local p = (i - 1) * 7 + 1
@@ -82,6 +193,7 @@ local function graph(cont)
     local len = sqrt((G.X[i] - G.X[j]) ^ 2 + (G.Y[i] - G.Y[j]) ^ 2)
     -- swimming is slower, deep water and steep slopes are kept for when there's no other way
     local f = hasBit(fl, E_DEEP) and 3 or hasBit(fl, E_WATER) and 1.6 or hasBit(fl, E_STEEP) and 1.5 or 1
+    if f == 1 then ground(G, i, j, len) end
     link(i, j, len * f)
     if not hasBit(fl, E_ONEWAY) then link(j, i, len * f) end
   end
@@ -111,6 +223,9 @@ local function blocks()
   return AuDHDDB.walkBlocked
 end
 local function cut(G, i, j)
+  -- the smoothing never draws a line across it either
+  G.cuts = G.cuts or {}
+  G.cuts[#G.cuts + 1] = { G.X[i], G.Y[i], G.X[j], G.Y[j] }
   for _, e in ipairs({ { i, j }, { j, i } }) do
     local a, c = G.adj[e[1]], G.cost[e[1]]
     for k = #a, 1, -1 do
@@ -372,7 +487,8 @@ function W.path(m1, x1, y1, m2, x2, y2, noFly)
   -- within a city: a straight line. The graph's few nodes there zig-zag round the lakes and terraces however we weigh
   -- them (the user in Darnassus, 2026-10-16: "paths are still fucked"), and the city is open enough to walk straight
   if CITY[m1] and m1 == m2 then cache[key] = false return nil end
-  local G = graph(c1)
+  -- straight lines chosen (Settings): no ground way, flights still (their walks to and from straight too)
+  local G = AuDHDDB.pathStyle ~= "straight" and graph(c1)
   local res = false
   if G then
     -- in a city the graph has few nodes (none in Ironforge's Tinker Town, so no way from Jemma Quikswitch to the tram:
@@ -404,21 +520,21 @@ function W.path(m1, x1, y1, m2, x2, y2, noFly)
     end
     if nodes then
       local pts, len, ride, rideCost = { X1, Y1 }, 0, nil, 0
-      local px, py = X1, Y1
+      local fixed = {}
       for k, i in ipairs(nodes) do
         if k > 1 and G.ride[nodes[k - 1] * 65536 + i] then
           -- a boat or portal: no line across the water, the path starts again where you land
           ride = G.ride[nodes[k - 1] * 65536 + i]
           rideCost = rideCost + G.rideCost[nodes[k - 1] * 65536 + i]
           pts[#pts + 1], pts[#pts + 2] = false, false
-        else
-          len = len + sqrt((G.X[i] - px) ^ 2 + (G.Y[i] - py) ^ 2)
         end
         pts[#pts + 1], pts[#pts + 2] = G.X[i], G.Y[i]
-        px, py = G.X[i], G.Y[i]
+        if G.ledge[i] then fixed[#pts / 2] = true end
       end
-      len = len + sqrt((X2 - px) ^ 2 + (Y2 - py) ^ 2)
       pts[#pts + 1], pts[#pts + 2] = X2, Y2
+      local raw = pts   -- along the graph's links: what /wfn blocked cuts
+      pts = smoothPts(G, pts, fixed)
+      len = walkLen(pts)
       -- into or out of a city: straight across the city to where the way crosses its edge (the gate, a portal), the
       -- graph only outside (the user, 2026-10-16: "the fastest way is directly east through the warriors terrace and
       -- out the gate")
@@ -431,10 +547,12 @@ function W.path(m1, x1, y1, m2, x2, y2, noFly)
       -- them a short hop can still go round a cliff
       -- (to or from a ledge, the long way round is the way: the cliff is the wall)
       local most = ledge and math.huge or (CITY[m1] or CITY[m2]) and 1.6 * straight + 30 or straight < 200 and 3 * straight + 60 or math.huge
-      if ride or len <= most then res = { c = c1, pts = pts, len = len, ride = ride, cost = len + rideCost } end
+      if ride or len <= most then res = { c = c1, pts = pts, raw = raw, len = len, ride = ride, cost = len + rideCost } end
     end
   end
-  if not noFly then res = flyPath(c1, X1, Y1, X2, Y2, m1, x1, y1, m2, x2, y2, res and res.cost or math.huge) or res end
+  -- straight lines: a flight only when it beats walking the straight line
+  local ground = res and res.cost or AuDHDDB.pathStyle == "straight" and sqrt((X2 - X1) ^ 2 + (Y2 - Y1) ^ 2) or math.huge
+  if not noFly then res = flyPath(c1, X1, Y1, X2, Y2, m1, x1, y1, m2, x2, y2, ground) or res end
   cacheN = cacheN + 1
   if cacheN > 400 then cache, cacheN = {}, 0 end
   cache[key] = res
@@ -473,6 +591,13 @@ flyPath = function(c, X1, Y1, X2, Y2, m1, x1, y1, m2, x2, y2, groundCost)
 end
 
 function W.resetPaths() cache, cacheN = {}, 0; W.newPaths() end
+-- "detailed" (the walk graph's way) or "straight" (a line to the spot); /wfn paths detailed|straight
+function W.setStyle(style)
+  AuDHDDB.pathStyle = style == "straight" and "straight" or nil
+  W.resetPaths()
+  if ns.routemap and ns.routemap.refresh then pcall(ns.routemap.refresh) end
+  return AuDHDDB.pathStyle or "detailed"
+end
 -- the flight map is open: the flight paths it shows you know (by the game's node id where it says, else by name)
 -- a flight path learned by talking to its flight master: on Forever they open a chat window first, and you have the
 -- path from then on, flight map opened or not (the user, 2026-10-18: Stormwind's "didn't update to being learned until
@@ -694,8 +819,9 @@ function W.block()
   if not (p and c and c == p.c) then return 0 end
   local G = graph(c)
   if not G then return 0 end
-  local pts = p.pts
-  local k = place(p, X, Y) or 3
+  -- the way along the graph's links (the drawn one is smoothed: its corners aren't linked)
+  local pts = p.raw or p.pts
+  local k = place({ pts = pts }, X, Y) or 3
   local n, walked, first, last = 0, 0, nil, nil
   for j = math.max(1, k - 2), #pts - 3, 2 do
     if not (pts[j] and pts[j + 2]) then break end   -- a ride: not a walk

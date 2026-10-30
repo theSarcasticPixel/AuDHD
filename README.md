@@ -51,7 +51,11 @@ Hold **Shift** while talking to an NPC to pause all of these.
 - **Sells grey items and repairs** at vendors.
 - **Hunters: buys ammo** to keep you stocked, leaving enough gold for your next training.
 - **Sell and train nudges.** Bags nearly full near a vendor, or new skills to learn near your class trainer? A reminder
-  pops up once per visit.
+  pops up once per visit, for Alliance and Horde. **Go to** points the arrow there; **Snooze** quiets it for 10, 20 or
+  30 minutes.
+- **Bank alt.** Name your bank character in the settings (Reminders) or with `/audhd bankalt <name>`. Near a mailbox
+  with gear you wouldn't wear or trade goods the route doesn't need, a reminder pops up, and the mail window gets a
+  **Fill mail** button that attaches them for you. You press Send.
 - **Quest complete message.** When a quest's objectives are all done, it says so in your chat, and (if you like) to your party when
   you're in one.
 
@@ -79,9 +83,11 @@ Hold **Shift** while talking to an NPC to pause all of these.
   and Tauren. Skyborne on either side. Pick one with the Routes button; each route shows how long it takes, and only
   routes for your race and side are offered.
 - **Class routes** that fit your class quests in where they cost least: Hunter (Night Elf, Human, Dwarf, Orc, Troll,
-  Tauren), Warlock (Human, Gnome, Orc, Undead), Shaman (Dwarf, Orc, Troll, Tauren) and Druid (Night Elf, Tauren,
-  Skyborne on either side). Hunter routes come in two kinds: pet first (level 10 and your pet as soon as possible) or
-  fastest to 30.
+  Tauren), Warlock (Human, Gnome, Orc, Undead), Shaman (Dwarf, Orc, Troll, Tauren), Druid (Night Elf, Tauren,
+  Skyborne on either side), Rogue (Orc, Troll, Undead, Horde Skyborne) and Warrior (Orc, Troll, Undead, Tauren, Horde
+  Skyborne). Hunter routes come in two kinds: pet first (level 10 and your pet as soon as possible) or fastest to 30.
+- **Mage class quests as side trips.** On the Orc, Troll and Undead routes a mage is offered each robe quest as a
+  pop-up when it comes up, with what it costs in time: do it or skip it.
 - **One step at a time.** "Take this quest", "kill 8 of these", "hand that in". Progress counts update as you play.
 - **It knows where you are.** Your place comes from your quest log and what you've done, not from a counter. Reloads,
   disconnects and quests done out of order don't lose your place.
@@ -97,6 +103,8 @@ Hold **Shift** while talking to an NPC to pause all of these.
   settings, or lock it so clicks go through.
 - **Walking paths, not straight lines.** Routes go around cliffs, trees, water and buildings, using a path map of each
   zone. Caves and mines lead you to the entrance first.
+- **Smoother paths.** The walking path is pulled straight wherever the ground allows, so it doesn't zigzag. Prefer
+  plain straight lines on the map? Switch them on in the settings (Windows) or with `/audhd paths`.
 - **Blocked?** `/audhd blocked` tells it the way ahead is closed and it finds another; `/audhd unblock` resets that.
 - **Flight paths.** Passing a flight master you don't have yet? It sends you to learn it first (talking to them is
   enough). Long trips use flights
@@ -113,6 +121,15 @@ Hold **Shift** while talking to an NPC to pause all of these.
   Choose all rares, only the route's rares, or none. Optionally, the mouse wheel cycles through nearby rares.
 - **Drop chances on mob tooltips.** Hover a mob to see what quest items it drops, the known (or estimated) chance, and
   how lucky you've been so far: `Dewy Lasher Frond 25% · you 2/9 (22%)`.
+
+## Info bar
+
+A bar along the top of the screen, one button per part: your money, gold an hour, XP an hour, time to the next level
+at that pace, free bag slots (click to open your bags), your most worn gear (hover for every piece), and the master
+volume (mouse wheel to change it, click to mute). Hover for more: money in and out, XP from kills and from quests,
+your rested bonus, kills to level. The session starts when you log in; right-click or `/audhd stats reset` starts it again.
+Show it, lock it, and pick its parts in the settings (Windows). With Titan Panel or another LibDataBroker display, it
+shows there too.
 
 ## Fishing
 
@@ -185,6 +202,9 @@ the detailed map.
 | `/audhd bigmap [on\|off\|replace on\|off]` | Open the detailed map, switch it on or off, or let it take the world map key |
 | `/audhd minimap on\|off` | Minimap button |
 | `/audhd blocked` · `unblock` | Route around a blocked path, or reset |
+| `/audhd paths [straight\|detailed]` | Walking paths on the map as straight lines or the detailed way |
+| `/audhd stats reset` | Start a new info bar session |
+| `/audhd bankalt <name>` | Your bank character, for the mail reminder |
 | `/audhd perf` | Measure the addon's frame time (for lag reports) |
 | `/audhd log` · `reset` | Show the log, or reset your progress |
 

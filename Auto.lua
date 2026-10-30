@@ -337,6 +337,19 @@ local function haveFor(equipLoc)
   end
   return best
 end
+-- a piece of gear in your bags you'd put on: you can use it and it beats what you wear in its slot (the bank-alt mail
+-- reminder keeps these)
+function A.wouldWear(link)
+  local _, _, _, equipLoc = C_Item.GetItemInfoInstant(link)
+  local slots = SLOTS[equipLoc]
+  if not slots or not canUse(link) then return false end
+  local worn
+  for _, slot in ipairs(slots) do
+    local sc = A.score(GetInventoryItemLink("player", slot))
+    worn = worn and math.min(worn, sc) or sc
+  end
+  return A.score(link) > (worn or 0)
+end
 
 -- a drink (restores mana): Food & Drink whose use is "Drink" (or "Refreshment", both)
 local function isDrink(link)

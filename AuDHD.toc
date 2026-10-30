@@ -2,7 +2,7 @@
 ## Title: AuDHD
 ## Notes: Remembers the small stuff: buff and ammo reminders, easy group buffs and healing, and what to do next. /audhd settings
 ## Author: theSarcasticPixel
-## Version: 0.3.5
+## Version: 0.3.6
 ## SavedVariables: AuDHDDB, AuDHDLog
 
 Route_nelf_any_start.lua
@@ -92,6 +92,7 @@ Rare.lua
 RouteMap.lua
 Ammo.lua
 Services.lua
+Stats.lua
 Imbue.lua
 BuffAsk.lua
 UseItem.lua
@@ -104,3 +105,21 @@ BigMap.lua
 AtlasData.lua
 Atlas.lua
 Perf.lua
+Route_orc_rogue_start.lua
+Route_orc_rogue_16-30.lua
+Route_troll_rogue_start.lua
+Route_troll_rogue_16-30.lua
+Route_undead_rogue_start.lua
+Route_undead_rogue_16-30.lua
+Route_skyborne_h_rogue_start.lua
+Route_skyborne_h_rogue_16-30.lua
+Route_orc_warrior_start.lua
+Route_orc_warrior_16-30.lua
+Route_troll_warrior_start.lua
+Route_troll_warrior_16-30.lua
+Route_undead_warrior_start.lua
+Route_undead_warrior_16-30.lua
+Route_tauren_warrior_start.lua
+Route_tauren_warrior_16-30.lua
+Route_skyborne_h_warrior_start.lua
+Route_skyborne_h_warrior_16-30.lua

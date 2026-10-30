@@ -31,6 +31,17 @@ local TABS = {
       function(on) if ns.range then ns.range.command(on and "show" or "hide") end end },
     { "Lock the range guide", function() return sub("range").locked end,
       function(on) if ns.range then ns.range.command(on and "lock" or "unlock") end end },
+    { "Gold and XP bar", function() return ns.stats and ns.stats.isShown() end,
+      function(on) if ns.stats then ns.stats.command(on and "show" or "hide") end end,
+      "At the top of the screen: your gold, gold an hour (net), XP an hour, the time to your next level, bag space, gear durability and volume. Right-click it for a new session" },
+    { "Lock the gold and XP bar", function() return ns.stats and ns.stats.isLocked() end,
+      function(on) if ns.stats then ns.stats.command(on and "lock" or "unlock") end end },
+    { "  ...free bag slots", function() return ns.stats and ns.stats.partShown("bags") end,
+      function(on) if ns.stats then ns.stats.setPart("bags", on) end end, "Click it to open your bags" },
+    { "  ...gear durability", function() return ns.stats and ns.stats.partShown("repair") end,
+      function(on) if ns.stats then ns.stats.setPart("repair", on) end end, "Your most worn piece; hover for the rest" },
+    { "  ...volume", function() return ns.stats and ns.stats.partShown("volume") end,
+      function(on) if ns.stats then ns.stats.setPart("volume", on) end end, "Mouse wheel on it: louder / quieter. Click: sound on / off" },
     { "Minimap button", function() return not sub("minimap").hide end,
       function(on) AuDHDDB.minimap = AuDHDDB.minimap or { angle = 200 }; AuDHDDB.minimap.hide = not on or nil
         if ns.minimap then ns.minimap.apply() end end, "Off: /wfn minimap brings it back" },
@@ -49,6 +60,10 @@ local TABS = {
       "Zoomed out, the detailed map shows the game's painted continent map, fading into the minimap's pictures as you zoom in; zoomed in, the cities the minimap's pictures don't show (Ironforge, Undercity, Stormwind, Orgrimmar) come from the game's city maps" },
     { "Route on the world map and minimap", function() return not AuDHDDB.mapHidden end,
       function(on) AuDHDDB.mapHidden = not on or nil if ns.routemap then pcall(ns.routemap.refresh) end end },
+    -- the user, 2026-10-28: "an option to make it show detailed pathing or just a line directly to your next spot"
+    { "  ...walking paths (off: straight lines)", function() return AuDHDDB.pathStyle ~= "straight" end,
+      function(on) if ns.walk then ns.walk.setStyle(on and "detailed" or "straight") end end,
+      "On: the way over the ground, round hills and water. Off: a straight line to each spot (the arrow too); flights still used" },
     { "Threat on nameplates", function() return not AuDHDDB.threatHidden end,
       function(on) if ns.threat then ns.threat.command(on and "on" or "off") end end },
     { "Listen button (with Chronicle)", function() return not AuDHDDB.chronicleOff end,
@@ -78,6 +93,9 @@ local TABS = {
     { "Sell and train reminders", function() return not AuDHDDB.servicesOff end,
       function(on) AuDHDDB.servicesOff = not on or nil if ns.services then ns.services.check() end end,
       "Near a vendor with full bags, or your trainer with new skills to learn" },
+    { "Mail BoEs and materials to my bank alt", function() return not AuDHDDB.mailOff end,
+      function(on) AuDHDDB.mailOff = not on or nil if ns.services then ns.services.check() end end,
+      "Passing a mailbox with BoE gear you wouldn't wear and materials in your bags: a reminder, and a button on the mail window that fills the mail. Set the bank alt's name below" },
     { "Quest item button", function() return not AuDHDDB.useItemOff end,
       function(on) AuDHDDB.useItemOff = not on or nil if ns.useItem then ns.useItem.refresh() end end,
       "A button for the item the current step needs you to use" },
@@ -89,7 +107,7 @@ local TABS = {
       "Also sends it to party chat when you're in a group" },
     { "Drop chances on mob tooltips", function() return not AuDHDDB.dropsOff end,
       function(on) AuDHDDB.dropsOff = not on or nil end },
-  } },
+  }, extra = "bankalt" },
   { "Rares", {
     { "Alerts for every rare", function() return (AuDHDDB.rares or "all") == "all" end,
       function() ns.rare.command("all") end, "A pop-up and the /tar button near any rare's spawn point" },
@@ -164,6 +182,7 @@ local function refresh()
       if not frame.shardMax:HasFocus() then frame.shardMax:SetText(tostring(mx)) end
       if not frame.shardLow:HasFocus() then frame.shardLow:SetText(tostring(lo)) end
     end
+    if frame.bankAlt and not frame.bankAlt:HasFocus() then frame.bankAlt:SetText(AuDHDDB.bankAlt or "") end
     frame.syncing = nil
   end
 end
@@ -289,6 +308,27 @@ function EXTRA.shards(page, y)
   y = heading(page, "Soul shards", y - 4)
   frame.shardMax = numberBox("Keep at most", PAGE_X + 4, "max")
   frame.shardLow = numberBox("Low at", PAGE_X + 124, "low")
+  return y - 34
+end
+
+-- the bank alt's name (the user, 2026-10-28: "make a bank alt and have it sit in a city")
+function EXTRA.bankalt(page, y)
+  local l = page:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  l:SetPoint("TOPLEFT", PAGE_X + 4, y - 12)
+  l:SetText("Bank alt's name")
+  local b = ns.newFrame("Settings", "EditBox", nil, page, "InputBoxTemplate")
+  b:SetSize(140, 20)
+  b:SetPoint("LEFT", l, "RIGHT", 10, 0)
+  b:SetAutoFocus(false)
+  b:SetMaxLetters(12)
+  b:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+  b:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+  b:SetScript("OnEditFocusLost", function(self)
+    local v = (self:GetText() or ""):gsub("%s", "")
+    if ns.services then ns.services.command(v == "" and "clear" or v) end
+    refresh()
+  end)
+  frame.bankAlt = b
   return y - 34
 end
 

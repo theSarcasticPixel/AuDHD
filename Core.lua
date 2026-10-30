@@ -103,7 +103,12 @@ local function order()
   local r, st = C.route(), rdb()
   if not st.order or #st.order == 0 then
     st.order = {}
-    for i = 1, #r.steps do st.order[i] = i end
+    -- a class side trip (cl) is only in the order of that class (the mage's robe quests on an any-class route)
+    local _, myClass = UnitClass("player")
+    for i = 1, #r.steps do
+      local cl = r.steps[i].cl
+      if not cl or cl == myClass then st.order[#st.order + 1] = i end
+    end
   end
   return st.order
 end
@@ -675,6 +680,30 @@ local CAVES = {
   ["Moonkin Stone cave"] = { m = 1439, door = { 43.1, 45.6 }, box = { 43.3, 43.8, 45.75, 46.25 } },
   ["Stormrage Barrow Dens"] = { m = 1450, door = { 72.15, 62.2 }, box = { 72.2, 75.7, 63.0, 67.8 } },
   ["Ur'endra's cave"] = { m = 2521, door = { 54.3, 65.8 }, box = { 52.8, 54.1, 64.4, 65.5 } },
+  -- starting zones (2026-10-29, doors and the way in from the guide; not yet seen in game)
+  ["Coldridge troll cave"] = { m = 1426, door = { 26.85, 79.83 }, box = { 26.9, 31.0, 77.8, 83.6 } },
+  -- 2026-10-30, the way in from the guides (Frostmane Hold: "Run up the side of the cave entrance"; the quarry: where
+  -- "inside" begins; Cliffspring: "at the mouth of the cave"; Thistlefur Hold: "Enter Thistlefur Hold"; Fargodeep: "Go
+  -- into the mine") or the wiki (Shadowthread Cave's entrance); not yet seen in game
+  ["Frostmane Hold"] = { m = 1426, door = { 24.9, 50.5 }, box = { 21.0, 24.6, 49.8, 55.0 } },
+  ["Gol'Bolar Quarry"] = { m = 1426, door = { 70.7, 56.3 }, box = { 70.2, 73.5, 49.8, 56.0 } },
+  ["Cliffspring cave"] = { m = 1439, door = { 54.9, 33.2 }, box = { 55.1, 57.6, 33.5, 37.2 } },
+  ["Thistlefur Hold"] = { m = 1440, door = { 38.4, 30.6 }, box = { 38.6, 42.5, 30.8, 35.2 } },
+  ["Shadowthread Cave"] = { m = 1438, door = { 56.7, 32.0 }, box = { 55.5, 58.5, 25.5, 31.7 } },
+  ["Fargodeep Mine"] = { m = 1429, door = { 40.5, 82.3 }, box = { 39.6, 42.2, 77.2, 82.0 } },
+  -- 2026-10-30, entrances placed by the user over the game's minimap; not yet seen in game
+  ["Azurelode Mine"] = { m = 1424, door = { 27.2, 59 }, box = { 26.7, 32.7, 50.9, 59.8 } },  -- box drawn on the page
+  ["Darrow Hill cave"] = { m = 1424, door = { 46, 32 }, box = { 41.8, 47.7, 24.7, 34.3 } },  -- box drawn on the page
+  ["Growless Cave"] = { m = 1416, door = { 37.6, 67.8 }, box = { 37, 38.2, 65.6, 66.8 } },  -- box fitted round its spots
+  ["Boulderslide Cavern"] = { m = 1442, door = { 57.9, 90.8 }, box = { 56.9, 63, 88.9, 94.1 } },  -- box drawn on the page
+  ["Old Icebeard's cave"] = { m = 1426, door = { 37.9, 53.8 }, box = { 37.9, 39.1, 53.3, 54.5 } },  -- box fitted round its spots
+  ["Jorel Windsinger's cave"] = { m = 2521, door = { 63.6, 37 }, box = { 63.9, 65.6, 34.1, 35.6 } },  -- box fitted round its spots
+  ["Incinerator Gar'im's cave"] = { m = 1433, door = { 71.6, 84.6 }, box = { 66.5, 73.2, 79.1, 86.9 } },  -- box fitted round its spots
+  ["Broodmother Valraxx's cave"] = { m = 1412, door = { 33.4, 7.5 }, box = { 33.1, 34, 6.5, 7.9 } },  -- box fitted round its spots
+  ["Volcor's cave"] = { m = 1439, door = { 44.7, 85.2 }, box = { 44.8, 45.6, 84.9, 85.9 } },  -- box round Volcor, short of the mouth (44.6,85.0) where the escape completes
+  ["Render's Rock"] = { m = 1433, door = { 28.1, 7.5 }, box = { 22.7, 23.9, 12, 13.2 } },  -- box fitted round its spots
+  ["Echo Ridge Mine"] = { m = 1429, door = { 47.63, 32.07 }, box = { 47.0, 51.0, 25.0, 31.8 } },
+  ["Jasperlode Mine"] = { m = 1429, door = { 61.65, 53.61 }, box = { 59.5, 62.2, 48.5, 53.4 } },
 }
 local function caveAt(m, x, y)
   for name, cv in pairs(CAVES) do
@@ -1678,11 +1707,32 @@ StaticPopupDialogs["AUDHD_STRETCH"] = {
   OnCancel = function(_, data, reason) if reason == "clicked" then C.stretchChoice(data, false) end end,
   timeout = 0, whileDead = true, hideOnEscape = false, preferredIndex = 3,
 }
+-- a class side trip: the same choice in other words
+StaticPopupDialogs["AUDHD_SIDE"] = {
+  text = "%s",
+  button1 = "Do it",
+  button2 = "Skip it",
+  OnAccept = function(_, data) C.stretchChoice(data, true) end,
+  OnCancel = function(_, data, reason) if reason == "clicked" then C.stretchChoice(data, false) end end,
+  timeout = 0, whileDead = true, hideOnEscape = false, preferredIndex = 3,
+}
 function C.stretchChoice(data, attempt)
   local st, o = rdb(), order()
   st.asked[data.i] = true
   log("STRETCH_CHOICE", { n = data.i, q = data.q, attempt = attempt })
   if attempt then return end
+  -- skip a side trip: all of its steps leave the route
+  if data.side then
+    local steps, keep = C.route().steps, {}
+    for p, i in ipairs(o) do
+      if not (p >= st.pos and steps[i].sd == data.side) then keep[#keep + 1] = i end
+    end
+    st.order = keep
+    stepStarted = GetTime()
+    C.advance("side-skip")
+    C.onStepChanged()
+    return
+  end
   -- skip: this quest's remaining steps go before the step the planner found (or out of the route)
   -- with it the quests that need it handed in first (Planting the Heart after The Moss-twined Heart: left behind, it
   -- sent you to Denalan for a quest you couldn't take, the user 2026-10-16)
@@ -1722,6 +1772,7 @@ end
 function C.stretchQuestion(step)
   local p = step and step.pop
   if not p or step.k == "turnin" then return nil end
+  if p.side then return p.q end   -- a side trip: always asked, its numbers as planned
   local me = UnitLevel and UnitLevel("player") or 0
   local ql = p.ql or tonumber((p.q or ""):match(" is level (%d+)"))
   local text = p.q or ""
@@ -1740,8 +1791,8 @@ function C.onStepChanged()
     if step.k == "buyammo" then C_Timer.After(0.5, ammoCheck) end
     local ask = C.stretchQuestion(step)
     if ask and not rdb().asked[i] then
-      local dlg = StaticPopup_Show("AUDHD_STRETCH", ask .. "\n\n" .. (step.pop.skip or ""))
-      if dlg then dlg.data = { i = i, q = step.q, before = step.pop.before } end
+      local dlg = StaticPopup_Show(step.pop.side and "AUDHD_SIDE" or "AUDHD_STRETCH", ask .. "\n\n" .. (step.pop.skip or ""))
+      if dlg then dlg.data = { i = i, q = step.q, before = step.pop.before, side = step.pop.side } end
     end
   end
   if ns.ui then ns.ui.refresh() end
@@ -2100,6 +2151,12 @@ SlashCmdList.AUDHD = function(input)
     end
   elseif cmd == "unblock" and ns.walk then
     say(("%d blocked stretches put back"):format(ns.walk.unblock()))
+  elseif cmd == "stats" and ns.stats then
+    say("info bar: " .. ns.stats.command(rest))
+  elseif cmd == "paths" and ns.walk then
+    say("map paths: " .. ns.walk.setStyle(rest == "straight" and "straight" or rest == "detailed" and "detailed" or (AuDHDDB.pathStyle == "straight" and "detailed" or "straight")))
+  elseif cmd == "bankalt" and ns.services then
+    ns.services.command(rest)
   elseif cmd == "log" then
     local n, s = ns.log.count()
     say(("%d entries this session, %d sessions saved (written on /reload or logout)"):format(n, s))
@@ -2109,6 +2166,6 @@ SlashCmdList.AUDHD = function(input)
     C.advance("route")
     say("route reset to step 1 (steps you've done are skipped again)")
   else
-    say("/wfn (show/hide), /wfn note <text>, /wfn done, /wfn later, /wfn back, /wfn goto <n>, /wfn route [name], /wfn routes, /wfn settings, /wfn minimap on|off, /wfn auto, /wfn ammo [off|<count>], /wfn arrow, /wfn map on|off, /wfn threat on|off, /wfn rares all|route|off, /wfn perf, /wfn spec [name], /wfn imbue [off|on], /wfn shards [off|on|max <n>|low <n>|lock|unlock|reset], /wfn heal [on|off|setup], /wfn fish [on|off|right|middle|4|5|status|loud on|off|volume <10-100>|lure on|off|zone on|off|map on|off], /wfn bigmap [on|off|replace on|off], /wfn atlas on|off (work in progress), /wfn buffs [off|on], /wfn announce [off|on], /wfn askbuffs [off|on], /wfn blocked, /wfn unblock, /wfn log, /wfn reset")
+    say("/wfn (show/hide), /wfn note <text>, /wfn done, /wfn later, /wfn back, /wfn goto <n>, /wfn route [name], /wfn routes, /wfn settings, /wfn minimap on|off, /wfn auto, /wfn ammo [off|<count>], /wfn arrow, /wfn map on|off, /wfn threat on|off, /wfn rares all|route|off, /wfn perf, /wfn spec [name], /wfn imbue [off|on], /wfn shards [off|on|max <n>|low <n>|lock|unlock|reset], /wfn heal [on|off|setup], /wfn fish [on|off|right|middle|4|5|status|loud on|off|volume <10-100>|lure on|off|zone on|off|map on|off], /wfn bigmap [on|off|replace on|off], /wfn atlas on|off (work in progress), /wfn buffs [off|on], /wfn announce [off|on], /wfn askbuffs [off|on], /wfn stats [show|hide|lock|unlock|reset|move|bags|repair|volume], /wfn paths [detailed|straight], /wfn bankalt [<name>|off|on|clear], /wfn blocked, /wfn unblock, /wfn log, /wfn reset")
   end
 end
