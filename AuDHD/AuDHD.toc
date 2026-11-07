@@ -1,0 +1,62 @@
+## Interface: 16001
+## Title: AuDHD
+## Notes: Remembers the small stuff: buff and ammo reminders, easy group buffs and healing, and what to do next. /audhd settings
+## Author: theSarcasticPixel
+## Version: 1.3.2
+## Dependencies: AuDHDEngine
+## SavedVariables: AuDHDDB, AuDHDLog
+
+WalkData.lua
+Walk.lua
+Weights.lua
+AmmoData.lua
+ServiceData.lua
+ProfTrainerData.lua
+DropData.lua
+RareData.lua
+SpawnData.lua
+RareDrops.lua
+Log.lua
+Share.lua
+Auto.lua
+Core.lua
+Party.lua
+QuestDone.lua
+Chronicle.lua
+UI.lua
+QuestFacts.lua
+RouteFixes.lua
+RouteFix.lua
+Guide.lua
+Dungeons.lua
+Track.lua
+Extra.lua
+Route.lua
+Settings.lua
+MinimapButton.lua
+Arrow.lua
+Way.lua
+Range.lua
+Threat.lua
+Rare.lua
+RouteMap.lua
+Ammo.lua
+Train.lua
+Services.lua
+ClassQuest.lua
+Stats.lua
+AltItems.lua
+AuctionData.lua
+Auction.lua
+Imbue.lua
+BuffAsk.lua
+UseItem.lua
+Shards.lua
+Heal.lua
+Tooltip.lua
+Fishing.lua
+TileData.lua
+BigMap.lua
+AtlasData.lua
+Atlas.lua
+Perf.lua

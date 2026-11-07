@@ -1,0 +1,16 @@
+## Interface: 16001
+## Title: AuDHD Engine
+## Notes: The guide engine behind AuDHD, based on Polestar.
+## Author: theSarcasticPixel, based on Polestar
+## Version: 0.3.4
+## X-License: GPL-3.0-only
+## SavedVariables: AuDHDEngineDB
+## SavedVariablesPerCharacter: AuDHDEngineCharDB
+
+Core\Core.xml
+Lookup\Lookup.xml
+Theme\Theme.xml
+Maps\Maps.xml
+Nav\Nav.xml
+Quests\Quests.xml
+Dungeons\Dungeons.xml

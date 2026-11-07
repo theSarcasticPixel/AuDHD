@@ -1,0 +1,186 @@
+-- Polestar.Data: load-on-demand data packs (Polestar_Codex and friends).
+-- Contract: docs/ARCHITECTURE.md, "Core services: Data, Hooks, Search".
+--
+--   Data.Pack(name) -> loaded, reason|nil
+--     Loads the pack once per session through C_AddOns.LoadAddOn. Never in
+--     combat (returns false, "combat"; a later call out of combat tries
+--     again). Any other failure is final for the session; reason is
+--     LoadAddOn's second return in lower case ("missing", "disabled",
+--     "interface_version", "dep_missing", ...), "unavailable" without the
+--     API, "error" when the load itself raised.
+--   Data.Info(name) -> { loaded, reason, memoryKB }
+--     memoryKB from UpdateAddOnMemoryUsage/GetAddOnMemoryUsage (nil when the
+--     client hides it).
+--   Data.CheckInstall() -> missing, stale, retired
+--     The release zip's folders beside Polestar: names of the required ones
+--     (Polestar_Guides, Polestar_Codex) that are not installed, and "name
+--     (version)" for any of them whose TOC version differs from Polestar's.
+--     retired: the locale codes whose old folders, Polestar_Guides_<locale>
+--     or Polestar_Names_<locale> (before 0.3.0; the language folder
+--     Polestar_<locale> replaced both), are still installed. Polestar never
+--     loads them.
+--     At login a non-empty result prints one line saying to reinstall: a
+--     player who copied only some folders, or one level too deep, finds out;
+--     the old folders get a line of their own saying to delete them.
+
+local ADDON, ns = ...
+
+local Data = {}
+ns.Data = Data
+
+local type, pcall, tostring = type, pcall, tostring
+local lower = string.lower
+
+local state = {} -- name -> { loaded = bool, reason = string|nil }
+
+local readable = ns.Compat.Readable
+
+local function alreadyLoaded(name)
+	local isLoaded = C_AddOns and C_AddOns.IsAddOnLoaded
+	if not isLoaded then return false end
+	local ok, loading, loaded = pcall(isLoaded, name)
+	if not ok then return false end
+	if loaded == nil then loaded = loading end
+	return readable(loaded) == true
+end
+
+function Data.Pack(name)
+	if type(name) ~= "string" or name == "" then return false, "missing" end
+	local s = state[name]
+	if s then
+		if s.loaded then return true end
+		if s.reason ~= "combat" then return false, s.reason end
+	end
+	if alreadyLoaded(name) then
+		state[name] = { loaded = true }
+		return true
+	end
+	if InCombatLockdown and InCombatLockdown() then
+		state[name] = { loaded = false, reason = "combat" }
+		return false, "combat"
+	end
+	local load = C_AddOns and C_AddOns.LoadAddOn
+	if not load then
+		state[name] = { loaded = false, reason = "unavailable" }
+		return false, "unavailable"
+	end
+	local ok, loaded, reason = pcall(load, name)
+	if not ok then
+		ns.Debug("Data.Pack:", name, tostring(loaded))
+		state[name] = { loaded = false, reason = "error" }
+		return false, "error"
+	end
+	loaded = readable(loaded)
+	if loaded then
+		state[name] = { loaded = true }
+		return true
+	end
+	reason = readable(reason)
+	reason = type(reason) == "string" and reason ~= "" and lower(reason) or "unknown"
+	state[name] = { loaded = false, reason = reason }
+	return false, reason
+end
+
+function Data.Info(name)
+	local s = state[name]
+	local info = { loaded = (s and s.loaded) or alreadyLoaded(name), reason = s and s.reason or nil }
+	if info.loaded and UpdateAddOnMemoryUsage and GetAddOnMemoryUsage then
+		local ok = pcall(UpdateAddOnMemoryUsage)
+		if ok then
+			local got, kb = pcall(GetAddOnMemoryUsage, name)
+			kb = got and readable(kb) or nil
+			if type(kb) == "number" then info.memoryKB = kb end
+		end
+	end
+	return info
+end
+
+-- Folders the release zip puts beside Polestar. The first two must be there;
+-- the walking routes (Polestar_Nav), quest and item packs and the language
+-- folder of the client's language (Names.PackName(), none in English) are optional
+-- (the arrow falls back to straight lines, names and guide texts to English; a source
+-- install may not build the packs), but when present they must be the same
+-- version.
+local COMPANIONS = { "AuDHD_Guides", "AuDHD_Codex", "AuDHD_Nav", "AuDHD_QuestDB", "AuDHD_ItemDB" }
+local REQUIRED = { AuDHD_Guides = true, AuDHD_Codex = true }
+
+local function installed(name)
+	local A = C_AddOns
+	if not A then return true end
+	if alreadyLoaded(name) then return true end
+	if A.DoesAddOnExist then
+		local ok, exists = pcall(A.DoesAddOnExist, name)
+		if ok then return readable(exists) == true end
+	end
+	if not A.GetAddOnInfo then return true end
+	local ok, _, _, _, _, reason = pcall(A.GetAddOnInfo, name)
+	return ok and readable(reason) ~= "MISSING"
+end
+
+local function versionOf(name)
+	local get = C_AddOns and C_AddOns.GetAddOnMetadata
+	if not get then return nil end
+	local ok, v = pcall(get, name, "Version")
+	v = ok and readable(v) or nil
+	return type(v) == "string" and v ~= "" and v or nil
+end
+
+local function check(name, mine, missing, stale)
+	if not installed(name) then
+		if REQUIRED[name] then missing[#missing + 1] = name end
+	else
+		local v = versionOf(name)
+		if v and mine and v ~= mine then stale[#stale + 1] = name .. " (" .. v .. ")" end
+	end
+end
+
+-- Every client language's folder before 0.3.0 had two: its guide texts and
+-- its names. Polestar_<locale> holds both now.
+local LOCALES = { "deDE", "esES", "esMX", "frFR", "koKR", "ptBR", "ruRU", "zhCN", "zhTW" }
+
+local function retiredLocales()
+	local out = {}
+	if not (C_AddOns and (C_AddOns.DoesAddOnExist or C_AddOns.GetAddOnInfo)) then return out end
+	for _, l in ipairs(LOCALES) do
+		if installed("AuDHD_Guides_" .. l) or installed("AuDHD_Names_" .. l) then out[#out + 1] = l end
+	end
+	return out
+end
+
+function Data.CheckInstall()
+	local missing, stale = {}, {}
+	local mine = ns.version
+	for _, name in ipairs(COMPANIONS) do check(name, mine, missing, stale) end
+	-- The language folder of the client's language (our guides' texts and
+	-- the game's names, Core/Names.lua and Core/GuideTexts.lua load it): never
+	-- missing either.
+	local language = ns.Names and ns.Names.PackName()
+	if language then check(language, mine, missing, stale) end
+	-- Our guide pack's race part for the player's race, when the release has
+	-- one (Core/Guides.lua loads it): never missing either.
+	local race = UnitRace and readable((select(2, UnitRace("player")))) or nil
+	if type(race) == "string" and race ~= "" then check("AuDHD_Guides_" .. race, mine, missing, stale) end
+	-- Our guide pack's part for the player's faction (format 8; Core/Guides.lua
+	-- loads it): every release has it, and without it the player has no
+	-- leveling guides.
+	local faction = ns.Compat.GetPlayerFaction and ns.Compat.GetPlayerFaction()
+	if faction and installed("AuDHD_Guides") then
+		local part = "AuDHD_Guides_" .. faction
+		if installed(part) then check(part, mine, missing, stale) else missing[#missing + 1] = part end
+	end
+	return missing, stale, retiredLocales()
+end
+
+ns.OnLogin(function()
+	local missing, stale, retired = Data.CheckInstall()
+	if #retired > 0 then
+		ns.Print(string.format(ns.L["AuDHDEngine no longer uses the old folders AuDHD_Guides_<language> and AuDHD_Names_<language> (%s): AuDHD_<language> holds both now. Close the game and delete them from Interface/AddOns."],
+			table.concat(retired, ", ")))
+	end
+	if #missing == 0 and #stale == 0 then return end
+	local parts = {}
+	if #missing > 0 then parts[#parts + 1] = string.format(ns.L["%s not installed"], table.concat(missing, ", ")) end
+	if #stale > 0 then parts[#parts + 1] = string.format(ns.L["%s from another version"], table.concat(stale, ", ")) end
+	ns.Print(string.format(ns.L["AuDHDEngine %s is installed incompletely: %s. Close the game, delete every AuDHDEngine folder in Interface/AddOns and unzip the latest AuDHDEngine zip there (CurseForge or GitHub Releases, not \"Source code\")."],
+		tostring(ns.version), table.concat(parts, "; ")))
+end)
