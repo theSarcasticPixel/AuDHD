@@ -367,7 +367,8 @@ local function isScroll(id)
 end
 local function amMage() return select(2, UnitClass("player")) == "MAGE" end
 -- what to mail your alts: BoE gear you wouldn't wear (green or better, not bound yet), materials (Trade Goods) and a
--- mage's scrolls, not bound. A list of { bag, slot, kind = "boe" | "mat" | "scroll", q = gear's quality, sub = Trade
+-- mage's scrolls, not bound. Never your tools (Auction.lua's: fishing poles, Flint and Tinder, Simple Wood, Mining
+-- Pick and the like) or fishing lures. A list of { bag, slot, kind = "boe" | "mat" | "scroll", q = gear's quality, sub = Trade
 -- Goods subtype, split = how many of the stack (the rest kept) }. Then what's kept for the route: { { id, n, why } }.
 -- What a quest needs stays: as many as it needs when the quest says (the rest of the stack goes), else all of them
 function M.mailables()
@@ -383,7 +384,11 @@ function M.mailables()
       local link = info and info.hyperlink
       if link and not info.isBound and not info.isLocked then
         local itemID, _, _, equipLoc, _, classID, subID = C_Item.GetItemInfoInstant(link)
-        if (classID == 2 or classID == 4) and equipLoc and equipLoc ~= "" and (info.quality or 0) >= 2
+        local id0 = info.itemID or itemID
+        if (ns.auction and ns.auction.isTool and ns.auction.isTool(id0, classID, subID))
+            or (ns.fishing and ns.fishing.isLure and ns.fishing.isLure(id0)) then
+          -- yours to use: stays in your bags
+        elseif (classID == 2 or classID == 4) and equipLoc and equipLoc ~= "" and (info.quality or 0) >= 2
             and not (ns.auto and ns.auto.keepForMe and ns.auto.keepForMe(link)) then
           out[#out + 1] = { bag = bag, slot = slot, kind = "boe", q = info.quality }
         elseif classID == 7 or (classID ~= 2 and classID ~= 4 and not amMage() and isScroll(info.itemID or itemID)) then
@@ -518,12 +523,15 @@ local function popup(kind)
       close()
     end)
   else
-    f.go = button("Go to", -108, 72, function()
-      local s = shown[kind]
-      if s and ns.way then ns.way.set(s.e.m, s.e.x, s.e.y, s.e.n) end
-      log("SERVICE_GOTO", { kind = kind, npc = s and s.e.n })
-      close()
-    end)
+    -- (only with an arrow to point)
+    if ns.way then
+      f.go = button("Go to", -108, 72, function()
+        local s = shown[kind]
+        if s then ns.way.set(s.e.m, s.e.x, s.e.y, s.e.n) end
+        log("SERVICE_GOTO", { kind = kind, npc = s and s.e.n })
+        close()
+      end)
+    end
     for i, mins in ipairs(SNOOZE) do
       f["snooze" .. mins] = button(mins .. " min", -34 + 68 * (i - 1), 64, function()
         snoozed[kind] = GetTime() + 60 * mins

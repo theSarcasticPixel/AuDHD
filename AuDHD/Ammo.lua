@@ -156,9 +156,10 @@ end
 
 -- point the arrow at the nearest vendor until you buy (or /audhd ammo off)
 function M.goVendor(off)
-  if off then ns.core.override = nil; return "the arrow follows the route again" end
+  if off then ns.core.override = nil; return ns.arrow and "the arrow follows the route again" or "ammo: nothing to stop" end
   local v, d = M.nearestVendor()
   if not v then return "no ammo vendor known nearby" end
+  if not ns.arrow then return ("the nearest ammo vendor: %s (%d yd)"):format(v.n, math.floor(d or 0)) end
   ns.core.override = { m = v.m, x = v.x, y = v.y, t = "Buy ammo from " .. v.n }
   return ("arrow points at %s (%d yd); /audhd ammo off to go back to the route"):format(v.n, math.floor(d or 0))
 end

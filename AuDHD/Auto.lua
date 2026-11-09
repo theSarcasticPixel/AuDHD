@@ -95,14 +95,27 @@ function handlers.QUEST_GREETING()
   end)
 end
 
+-- the quest window's giver is a player: a quest shared from their log
+local isSecret = issecretvalue or function() return false end
+local function sharedByPlayer()
+  if not UnitIsPlayer then return false end
+  local ok, p = pcall(UnitIsPlayer, "questnpc")
+  return ok and not isSecret(p) and p == true
+end
+
 function handlers.QUEST_DETAIL()
   if paused() or not on("accept") then return end
   -- the quest's ID is 0 until the server's details arrive: wait for them
   withRetries("QUEST_DETAIL", "QuestFrame", function()
     local id = GetQuestID()
     if not id or id == 0 then return false, { questID = 0 } end
-    -- not what the guide wants now (a timed quest on the way somewhere, say): the window stays open for you to choose
-    if ns.guide and not ns.guide.wants(id) then return true, { questID = id, left = true } end
+    if sharedByPlayer() then
+      -- shared by someone in your group: taken whatever the route, except a timed quest (left for you to choose)
+      if ns.track and ns.track.isTimed(id) then return true, { questID = id, left = true, shared = true } end
+    elseif ns.guide and not ns.guide.wants(id) then
+      -- not what the guide wants now (a timed quest on the way somewhere, say): the window stays open for you to choose
+      return true, { questID = id, left = true }
+    end
     AcceptQuest()
     return true, { questID = id }
   end)

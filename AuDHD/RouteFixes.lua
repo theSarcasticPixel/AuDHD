@@ -31,6 +31,17 @@ ns.routeFixes = {
     -- in `add`, the first visit's in `drop`)
     { guide = TN, t = "collect", q = 98216, after = { "turnin", 299 } },
     { guide = TN, t = "turnin", q = 98216, after = { "collect", 98216 } },
+    -- Kurzen's Mystery (207) needs The Second Rebellion (203) and Bad Medicine (204) handed in: taken at the Rebel Camp
+    -- once both are, not on the first visit
+    { guide = "forever/alliance/30-40/04-stranglethorn-vale", t = "accept", q = 207, after = { "turnin", 204 },
+      note = "Kurzen's Mystery is taken once The Second Rebellion and Bad Medicine are handed in" },
+    -- Sara Balloo's Plea (683) needs Sully Balloo's Letter (637) handed in, to Sara Balloo herself: the letter first,
+    -- then her quest. Without the letter the hand-in is passed and her quest isn't offered
+    { guide = "forever/alliance/30-40/01-hillsbrad-foothills", t = "turnin", q = 637, before = { "accept", 683 },
+      note = "Sully Balloo's Letter was handed in to Sara Balloo with her quest" },
+    -- Hillsbrad's Hoard (98059): the letter is placed in Hillsbrad's town hall first (see `add`), so it's handed in to
+    -- Captain McManus on the next Southshore visit, not straight after it's taken
+    { guide = "forever/alliance/30-40/01-hillsbrad-foothills", t = "turnin", q = 98059, before = { "turnin", 510 } },
   },
   -- a prerequisite the quest data leaves out: [the accept's quest] needs `pre` handed in (the same chain)
   pre = {
@@ -50,6 +61,13 @@ ns.routeFixes = {
     -- can't fit: left out
     { guide = A, q = 98240 },
     { guide = "forever/alliance/30-40/01-hillsbrad-foothills", q = 98240 },
+    -- This Land Was Their Land (98230) isn't offered until Nek'rosh's Gambit (465) is handed in, which the route does
+    -- after 98230's own hand-in, and it never returns to Howin Kindfeather after that. Howin's quests don't need it:
+    -- left out, with the walk to Menethil Keep that was only for it
+    { guide = "forever/alliance/30-40/01-hillsbrad-foothills", q = 98230 },
+    { guide = "forever/alliance/30-40/01-hillsbrad-foothills", t = "goto", area = 2104 },
+    -- Hearts of the Lost (87318): Comar Villard doesn't offer it in game, it looks removed. Its pick-up and hand-in go
+    { guide = "forever/alliance/30-40/01-hillsbrad-foothills", q = 87318 },
     { guide = A, q = 98216, t = "accept" },
     { guide = A, q = 98310, t = "accept" },
     { guide = A, q = 98313, t = "accept" },
@@ -70,6 +88,11 @@ ns.routeFixes = {
     -- For Further Study as Gleaning Our Future is handed in to Whelgar (the Hillsbrad guide hands it in to Karnik later)
     { guide = "forever/alliance/30-40/01-hillsbrad-foothills", after = { "turnin", 98310 }, goals = {
       { t = "accept", quest = 98313, title = "For Further Study", npc = 1077, npcName = "Prospector Whelgar", minLevel = 24, qlvl = 32, pre = { 98310 }, preTitles = { [98310] = "Gleaning Our Future" }, map = 1437, x = 38.81, y = 52.39, z = 117, f = "e", note = "For Historian Karnik in Ironforge, later in the route" },
+    } },
+    -- Hillsbrad's Hoard (98059): its quest data has no objective, only the text (place the letter on the bookkeeping
+    -- table in Hillsbrad's town hall), with no place: 30.0, 42.8 is where that table stands
+    { guide = "forever/alliance/30-40/01-hillsbrad-foothills", after = { "accept", 98059 }, goals = {
+      { t = "complete", quest = 98059, title = "Hillsbrad's Hoard", map = 1424, x = 30.0, y = 42.8, f = "e", note = "Place the {item:279386} on the bookkeeping table in the town hall", objs = { { text = "Place the Sealed Company Request", count = 1 } } },
     } },
     -- ---------------------------------------------------------------- timers
     { guide = A, after = { "turnin", 1020 }, goals = { wait(24) } },

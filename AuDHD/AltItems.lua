@@ -418,6 +418,7 @@ function A.bagsButtonOn() return not AuDHDDB.altBagsButtonOff end
 function A.setBagsButton(on)
   AuDHDDB.altBagsButtonOff = not on or nil
   if A.bagButton then A.bagButton:SetShown(on and true or false) end
+  if A.bankButton then A.bankButton:SetShown(on and true or false) end
 end
 local function ago(t)
   local days = math.floor(((time and time() or t) - t) / 86400)
@@ -605,6 +606,29 @@ function A.showAll()
   return n
 end
 function A.closeAll() for _, w in pairs(bagWins) do w:Hide() end end
+-- your own bank, as it was when you last closed it. With toggle, a second go closes it (then false)
+function A.openBank(toggle)
+  local name = me()
+  if not name then return nil end
+  local w = bagWins[name]
+  if toggle and w and w:IsShown() and w.view == "bank" then w:Hide() return false end
+  bagWindow(name).view = "bank"
+  A.openBags(name)
+  return true
+end
+-- after the game's open-all-bags with Shift held (Shift-B): your bank window opens and closes with the bags. Only ever
+-- after the game's own code has run, so its bag frames are never opened from here
+function A.allBagsToggled()
+  if not (IsShiftKeyDown and IsShiftKeyDown()) then return end
+  local name = me()
+  if not name then return end
+  if IsBagOpen and IsBagOpen(0) then
+    A.openBank()
+  else
+    local w = bagWins[name]
+    if w and w:IsShown() and w.view == "bank" then w:Hide() end
+  end
+end
 local function redraw() for _, w in pairs(bagWins) do if w:IsShown() then pcall(draw, w) end end end
 A.redraw = redraw
 
@@ -654,7 +678,28 @@ function A.pick(anchor)
   picker:Show()
 end
 
--- the Alts button, sitting on top of the game's backpack
+-- the Alts button, sitting on top of the game's backpack, and the Bank button beside it
+local function placeBankButton(bag)
+  local b = A.bankButton
+  if not b then
+    b = ns.newFrame("AltItems", "Button", "AuDHDBankBagsButton", UIParent, "UIPanelButtonTemplate")
+    b:SetSize(60, 20)
+    b:SetText("Bank")
+    b:SetScript("OnClick", function() pcall(A.openBank, true) end)
+    b:SetScript("OnEnter", function(self)
+      GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+      GameTooltip:SetText("Your bank")
+      GameTooltip:AddLine("What's in your bank, as it was when you last closed it", 1, 1, 1, true)
+      GameTooltip:Show()
+    end)
+    b:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    A.bankButton = b
+  end
+  b:SetParent(bag)
+  b:ClearAllPoints()
+  b:SetPoint("RIGHT", A.bagButton, "LEFT", -4, 0)
+  b:SetShown(A.bagsButtonOn())
+end
 local function placeBagButton(bag)
   local b = A.bagButton
   if not b then
@@ -675,37 +720,33 @@ local function placeBagButton(bag)
   b:ClearAllPoints()
   b:SetPoint("BOTTOMRIGHT", bag, "TOPRIGHT", -8, -2)
   b:SetShown(A.bagsButtonOn())
+  placeBankButton(bag)
 end
--- the reagent bag opens and closes with the backpack: the game's B key leaves it shut
+-- the reagent bag with the backpack: B runs the game's own open-all-bags (bindKeys), which opens it too. Never opened
+-- or closed from here: the game's bag frames keep that taint, and the bank's purchase reads it
 function A.reagentOn() return not AuDHDDB.reagentWithBagsOff end
-function A.setReagent(on) AuDHDDB.reagentWithBagsOff = not on or nil end
+function A.setReagent(on)
+  AuDHDDB.reagentWithBagsOff = not on or nil
+  A.bindKeys()
+end
 local function reagentBag()
   local r = Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag
   if not r or not C_Container or (C_Container.GetContainerNumSlots(r) or 0) == 0 then return nil end
   return r
-end
-function A.backpackShown()
-  local r = A.reagentOn() and reagentBag()
-  if r and OpenBag and not (IsBagOpen and IsBagOpen(r)) then OpenBag(r) end
-end
-function A.backpackHidden()
-  local r = A.reagentOn() and reagentBag()
-  if r and CloseBag and IsBagOpen and IsBagOpen(r) then CloseBag(r) end
 end
 local function hookBags()
   for i = 1, NUM_CONTAINER_FRAMES or 13 do
     local f = _G["ContainerFrame" .. i]
     if f and f.HookScript then
       f:HookScript("OnShow", function(self)
-        if self.GetID and self:GetID() == 0 then pcall(placeBagButton, self) pcall(A.backpackShown) end
+        if self.GetID and self:GetID() == 0 then pcall(placeBagButton, self) end
       end)
-      f:HookScript("OnHide", function(self) if self.GetID and self:GetID() == 0 then pcall(A.backpackHidden) end end)
     end
   end
   if ContainerFrameCombinedBags and ContainerFrameCombinedBags.HookScript then
-    ContainerFrameCombinedBags:HookScript("OnShow", function(self) pcall(placeBagButton, self) pcall(A.backpackShown) end)
-    ContainerFrameCombinedBags:HookScript("OnHide", function() pcall(A.backpackHidden) end)
+    ContainerFrameCombinedBags:HookScript("OnShow", function(self) pcall(placeBagButton, self) end)
   end
+  if hooksecurefunc and ToggleAllBags then hooksecurefunc("ToggleAllBags", function() pcall(A.allBagsToggled) end) end
 end
 -- /audhd bags [all|close|<name>]
 function A.bagsCommand(rest)
@@ -725,6 +766,26 @@ end
 
 -- ------------------------------------------------------------------ events
 local frame = ns.newFrame("AltItems", "Frame")
+-- Shift-B runs the game's own open-all-bags, as an override (your saved key bindings stay as they are), and the bank
+-- window follows (A.allBagsToggled). B does too while you have a reagent bag and the setting is on, so it opens with
+-- the backpack. Neither key when it's bound to something other than your bags. Out of combat only (waits for it)
+local hadReagent
+local function bindKeys()
+  if not (GetBindingAction and SetOverrideBinding and ClearOverrideBindings) then return end
+  if InCombatLockdown and InCombatLockdown() then
+    pcall(frame.RegisterEvent, frame, "PLAYER_REGEN_ENABLED")
+    return
+  end
+  local function bagKey(key)
+    local now = GetBindingAction(key) or ""
+    return now == "" or now:find("BAG") or now:find("BACKPACK")
+  end
+  hadReagent = reagentBag() ~= nil
+  ClearOverrideBindings(frame)
+  if bagKey("SHIFT-B") then SetOverrideBinding(frame, false, "SHIFT-B", "OPENALLBAGS") end
+  if hadReagent and A.reagentOn() and bagKey("B") then SetOverrideBinding(frame, false, "B", "OPENALLBAGS") end
+end
+A.bindKeys = bindKeys
 for _, e in ipairs({ "PLAYER_LOGIN", "BAG_UPDATE_DELAYED", "BANKFRAME_OPENED", "BANKFRAME_CLOSED", "PLAYERBANKSLOTS_CHANGED",
                      "MAIL_INBOX_UPDATE", "MAIL_SEND_SUCCESS", "MAIL_FAILED" }) do
   pcall(frame.RegisterEvent, frame, e)
@@ -733,12 +794,15 @@ frame:SetScript("OnEvent", function(_, event)
   if event == "PLAYER_LOGIN" then
     pcall(hookTooltips)
     pcall(hookBags)
+    pcall(bindKeys)
     if hooksecurefunc and SendMail then hooksecurefunc("SendMail", function(to) pcall(A.sending, to) end) end
     -- after Services has noted this character (the surname can come late)
     C_Timer.After(6, function() pcall(A.tidy) pcall(A.scanBags) end)
   elseif event == "BAG_UPDATE_DELAYED" then
     pcall(A.scanBags)
     pcall(A.scanBank)
+    -- a reagent bag put on or taken off (the bag's size can come after login)
+    if (reagentBag() ~= nil) ~= hadReagent then pcall(bindKeys) end
   elseif event == "BANKFRAME_OPENED" then
     bankOpen = true
     pcall(A.scanBank)
@@ -754,5 +818,8 @@ frame:SetScript("OnEvent", function(_, event)
     redraw()
   elseif event == "MAIL_FAILED" then
     pcall(A.mailFailed)
+  elseif event == "PLAYER_REGEN_ENABLED" then
+    frame:UnregisterEvent("PLAYER_REGEN_ENABLED")
+    pcall(bindKeys)
   end
 end)

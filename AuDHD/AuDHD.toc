@@ -2,7 +2,7 @@
 ## Title: AuDHD
 ## Notes: Remembers the small stuff: buff and ammo reminders, easy group buffs and healing, and what to do next. /audhd settings
 ## Author: theSarcasticPixel
-## Version: 1.3.2
+## Version: 1.4.0
 ## Dependencies: AuDHDEngine
 ## SavedVariables: AuDHDDB, AuDHDLog
 
@@ -13,6 +13,7 @@ AmmoData.lua
 ServiceData.lua
 ProfTrainerData.lua
 DropData.lua
+QuestItemData.lua
 RareData.lua
 SpawnData.lua
 RareDrops.lua
@@ -48,6 +49,7 @@ Stats.lua
 AltItems.lua
 AuctionData.lua
 Auction.lua
+TrainerValue.lua
 Imbue.lua
 BuffAsk.lua
 UseItem.lua
@@ -55,6 +57,7 @@ Shards.lua
 Heal.lua
 Tooltip.lua
 Fishing.lua
+FishGear.lua
 TileData.lua
 BigMap.lua
 AtlasData.lua

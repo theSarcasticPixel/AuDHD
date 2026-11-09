@@ -1,4 +1,5 @@
 <Bindings>
   <Binding name="CLICK AuDHDFishCast:LeftButton" header="AUDHD" category="ADDONS" />
+  <Binding name="CLICK AuDHDGoFishing:LeftButton" category="ADDONS" />
   <Binding name="AUDHD_BIGMAP" header="AUDHD" category="ADDONS">AuDHD_ToggleBigMap()</Binding>
 </Bindings>

@@ -58,19 +58,24 @@ Hold **Shift** while talking to an NPC to pause all of these.
   30 minutes.
 - **Alt mail.** In the settings (Alt mail tab), name your bank character, first and last name, or pick an alt for
   each kind of item: herbs to your alchemist, ore to your blacksmith, green BoE gear to your enchanter, the rest to a
-  catch-all. Each character has its own alt mail settings and starts with them off. Near a mailbox with gear you wouldn't wear or trade goods the route doesn't need, a reminder pops up, and
+  catch-all. Each character has its own alt mail settings and starts with them off. Near a mailbox with gear you wouldn't wear or trade goods the route doesn't need, a reminder pops up (your tools,
+  fishing poles and lures stay with you), and
   the mail window gets a **Send all** button: it asks once, then sends them alt by alt, 12 items a mail. Mail only goes
   to characters that have logged in with AuDHD on your account, so a typo doesn't send your herbs to a stranger. For
   an alt on another account, tick **Other account**. The game can't tell an addon when you delete a character, so
   **Your characters...** lists them with when each was last played: remove ones you've deleted, so a new player who
   takes the name never gets your mail.
+- **Quest item tooltips.** Item tooltips name each quest the item is for, and whether you're on it (with your count), it's
+  ready to hand in or it's handed in.
 - **What your alts carry.** Item tooltips list which of your characters on this realm have that item, and where: bags,
   bank (as it was when they last closed it), their mailbox, or mail on the way to them. Worn gear isn't counted.
   **Find an item...** (Alt mail tab, or `/audhd find <name>`) searches them all by part of the name. Each character
   is added once you log in on it.
   The **Alts** button on top of your backpack opens another character's bags, bank or mail as if they were yours, or
-  **Show all** of them side by side (also `/audhd bags`).
-- **Reagent bag.** Opens and closes with your backpack (Settings > User Interface).
+  **Show all** of them side by side (also `/audhd bags`). The **Bank** button beside it opens your own bank, as it was
+  when you last closed it, anywhere. **Shift-B** opens your bags and bank together, and again closes them (Shift-B is only
+  taken over when it opens bags or does nothing).
+- **Reagent bag.** B opens it with your backpack, when B opens your bags (Settings > User Interface).
 - **Auction house.** A window beside the auction house:
   - **Sell** lists what is in your bags that can go up (not what the route still needs, or gear you would wear). Pick
     one and it finds the cheapest price on sale and matches it, since the newest auction at a price sells first. Set
@@ -86,6 +91,8 @@ Hold **Shift** while talking to an NPC to pause all of these.
     items a vendor pays about as much for. Hold **Shift** on an item tooltip for its price history.
   - A grey frame marks the stack in your bags that loses you least if you need room.
   - Crate tooltips price each bundle. Alt-click a crate to add a bundle to your shopping banker's list.
+  - At a profession trainer, a recipe's tooltip shows what the item it makes fetches at a vendor, at auction and
+    disenchanted, what its reagents cost at auction, and the return, so you can pick which recipes pay.
 - **Quest complete message.** When a quest's objectives are all done, it says so in your chat, and (if you like) to your party when
   you're in one.
 
@@ -162,7 +169,7 @@ off by default (Settings > Dungeons), where you can also choose which dungeons t
 ## Info bar
 
 A bar along the top of the screen, one button per part: your money, gold an hour, XP an hour, time to the next level
-at that pace, bag slots free or in use, your choice (click to open your bags), your most worn gear (hover for every piece), and the master
+at that pace, bag slots free or in use, your choice, your most worn gear (hover for every piece), and the master
 volume (mouse wheel to change it, click to mute). Hover for more: money in and out, XP from kills and from quests,
 your rested bonus, kills to level. The session starts when you log in; right-click or `/audhd stats reset` starts it again.
 Show it, lock it, and pick its parts in the settings (Windows).
@@ -173,6 +180,11 @@ Show it, lock it, and pick its parts in the settings (Windows).
   button 4 or 5) casts, and the same click reels in when the bobber splashes. Holding the button still turns the camera
   as usual.
 - **Lures for you.** No lure on your pole? The click puts the best one from your bags on first.
+- **Fishing food first.** Food or drink that gives +fishing in your bags and its buff not on you: the click has it
+  before the lure and the cast.
+- **Go fishing button.** A small round button (drag it anywhere, or set a key in Key Bindings, AuDHD) puts on the
+  best fishing pole in your bags; press it again for your own weapons. While a pole is in your hands, the best
+  +fishing gear in your bags goes on, and your own goes back when the pole comes off.
 - **A louder splash.** While a pole is equipped the splash is turned up and the music and ambience down, so the bite
   is easy to hear. Set the volume in the settings. Everything goes back when you take the pole off.
 - **Fishing level of the zone**, under the minimap while you hold a pole and on the world map, coloured like quest
@@ -237,6 +249,7 @@ the detailed map.
 | `/audhd fish [on\|off\|right\|middle\|4\|5]` | One-click fishing, and which mouse button |
 | `/audhd fish loud on\|off` · `volume <10-100>` | The louder splash, and its volume |
 | `/audhd fish lure on\|off` · `zone on\|off` · `map on\|off` | Lures, the zone's fishing level under the minimap, on the world map |
+| `/audhd fish go` · `gear on\|off` · `food on\|off` · `button on\|off` | Go fishing (or stop), fishing gear with the pole, fishing food, the Go fishing button |
 | `/audhd fish status` | What one-click fishing sees right now |
 | `/audhd bigmap [on\|off\|replace on\|off]` | Open the detailed map, switch it on or off, or let it take the world map key |
 | `/audhd minimap on\|off` | Minimap button |

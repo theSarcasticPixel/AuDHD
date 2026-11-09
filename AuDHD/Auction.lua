@@ -506,10 +506,11 @@ end
 local NOT_JUNK = { [1] = true, [6] = true, [11] = true, [12] = true }   -- bags, projectiles, quivers, quest items
 -- nor tools: any fishing pole (weapon subclass 20), and these, by id from the Codex: Mining Pick, Flint and Tinder (and
 -- Forever's Ceremonial ones), Thieves' Tools, the shaman totems (and Forever's Twisted ones), the blacksmith hammers,
--- the enchanting rods, Arclight Spanner, Gyromatic Micro-Adjustor, Philosopher's Stone, the skinning knives
+-- the enchanting rods, Arclight Spanner, Gyromatic Micro-Adjustor, Philosopher's Stone, the skinning knives, Simple Wood
 local TOOLS = {}
 for _, id in ipairs({ 2901, 4471, 278083, 281044, 5060, 5175, 5176, 5177, 5178, 274044, 274045, 274046, 274047, 5956,
-  285279, 285280, 285281, 6218, 6339, 11130, 11145, 16207, 6219, 10498, 9149, 7005, 269716 }) do TOOLS[id] = true end
+  285279, 285280, 285281, 6218, 6339, 11130, 11145, 16207, 6219, 10498, 9149, 7005, 269716, 4470 }) do TOOLS[id] = true end
+function A.isTool(id, classID, subID) return TOOLS[id] or (classID == 2 and subID == 20) or false end
 function A.cheapestSlot()
   if not A.cheapMarkOn() then return nil end
   local get = (C_Item and C_Item.GetItemInfo) or GetItemInfo
@@ -521,7 +522,7 @@ function A.cheapestSlot()
       if link and id then
         local _, _, _, _, _, classID, subID = C_Item.GetItemInfoInstant(link)
         local need = ns.services and ns.services.routeNeeds and ns.services.routeNeeds(id)
-        local tool = TOOLS[id] or (classID == 2 and subID == 20)
+        local tool = A.isTool(id, classID, subID)
         if not NOT_JUNK[classID or -1] and not need and not tool then
           local n = info.stackCount or 1
           local vendor = select(11, get(link))

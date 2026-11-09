@@ -594,21 +594,36 @@ frame:RegisterEvent("PLAYER_LOGIN")
 
 -- ------------------------------------------------------------------ /audhd
 local function say(msg) print("|cff66ccffAuDHD|r: " .. msg) end
+-- /audhd with no command it knows: each command with the part it needs (ns[part]), left out when that part isn't there
+local HELP = { { "(show/hide)", "ui" }, { "note <text>" }, { "done", "guide" }, { "later", "guide" },
+  { "unskip", "guide" }, { "back", "guide" }, { "goto <n>", "guide" }, { "settings" }, { "minimap on|off" },
+  { "auto" }, { "ammo [off|<count>]" }, { "arrow", "arrow" }, { "map on|off", "routemap" },
+  { "threat on|off", "threat" }, { "rares all|route|off", "rare" }, { "perf", "perf" }, { "spec [name]" },
+  { "imbue [off|on]", "imbue" }, { "shards [off|on|max <n>|low <n>|lock|unlock|reset]", "shards" },
+  { "heal [on|off|setup]", "heal" },
+  { "fish [on|off|right|middle|4|5|status|loud on|off|volume <10-100>|lure on|off|zone on|off|map on|off|go|gear on|off|food on|off|button on|off]" },
+  { "bigmap [on|off|replace on|off]", "bigmap" }, { "atlas on|off (work in progress)", "atlas" },
+  { "buffs [off|on]" }, { "food [off|on]" }, { "scrolls [off|on]" }, { "announce [off|on]", "questDone" },
+  { "askbuffs [off|on]", "buffAsk" }, { "stats [show|hide|lock|unlock|reset|move|bags|repair|volume]" },
+  { "paths [detailed|straight]", "walk" }, { "bankalt [<name>|off|on|clear]" }, { "find <item>" },
+  { "bags [all|close|<name>]" }, { "ah [scan|on|off|price <item>]" }, { "blocked", "walk" }, { "unblock", "walk" },
+  { "where", "track" }, { "guides", "picker" }, { "dungeons [name]", "dungeons" }, { "extra", "extra" },
+  { "share", "share" }, { "report", "share" }, { "log" } }
 SLASH_AUDHD1 = "/audhd"
 SLASH_AUDHD2 = "/wfn"
 SlashCmdList.AUDHD = function(input)
   local cmd, rest = (input or ""):match("^%s*(%S*)%s*(.-)%s*$")
   cmd = cmd:lower()
   if cmd == "" then
-    if ns.ui then ns.ui.toggle() end
+    if ns.ui then ns.ui.toggle() elseif ns.settings then ns.settings.show() end
   elseif cmd == "note" and rest ~= "" then
     local step, i = C.current()
     log("NOTE", { text = rest, n = i, q = step and step.q })
     say("noted: " .. rest)
-  elseif cmd == "done" then C.markDone("manual")
-  elseif cmd == "later" then C.later()
-  elseif cmd == "back" then C.back()
-  elseif cmd == "goto" and tonumber(rest) then C.jump(tonumber(rest))
+  elseif cmd == "done" and ns.guide then C.markDone("manual")
+  elseif cmd == "later" and ns.guide then C.later()
+  elseif cmd == "back" and ns.guide then C.back()
+  elseif cmd == "goto" and ns.guide and tonumber(rest) then C.jump(tonumber(rest))
   elseif cmd == "settings" and ns.settings then
     ns.settings.show()
   elseif cmd == "minimap" and ns.minimap then
@@ -635,11 +650,11 @@ SlashCmdList.AUDHD = function(input)
     if rest == "off" then say(ns.ammo.goVendor(true))
     elseif tonumber(rest) then AuDHDDB.ammoTarget = tonumber(rest); say("buying ammo up to " .. rest)
     else say(ns.ammo.goVendor()) end
-  elseif cmd == "map" then
+  elseif cmd == "map" and ns.routemap then
     AuDHDDB.mapHidden = (rest == "off") or nil
     if ns.routemap then ns.routemap.refresh() end
     say("route on the maps: " .. (AuDHDDB.mapHidden and "off" or "on") .. " (/audhd map on|off)")
-  elseif cmd == "arrow" then
+  elseif cmd == "arrow" and ns.arrow then
     say(ns.arrow.command(rest))
   elseif cmd == "range" then
     say(ns.range.command(rest))
@@ -722,7 +737,9 @@ SlashCmdList.AUDHD = function(input)
     local n, s = ns.log.count()
     say(("%d entries this session, %d sessions saved (written on /reload or logout)"):format(n, s))
   else
-    say("/audhd (show/hide), /audhd note <text>, /audhd done, /audhd later, /audhd unskip, /audhd back, /audhd goto <n>, /audhd settings, /audhd minimap on|off, /audhd auto, /audhd ammo [off|<count>], /audhd arrow, /audhd map on|off, /audhd threat on|off, /audhd rares all|route|off, /audhd perf, /audhd spec [name], /audhd imbue [off|on], /audhd shards [off|on|max <n>|low <n>|lock|unlock|reset], /audhd heal [on|off|setup], /audhd fish [on|off|right|middle|4|5|status|loud on|off|volume <10-100>|lure on|off|zone on|off|map on|off], /audhd bigmap [on|off|replace on|off], /audhd atlas on|off (work in progress), /audhd buffs [off|on], /audhd food [off|on], /audhd scrolls [off|on], /audhd announce [off|on], /audhd askbuffs [off|on], /audhd stats [show|hide|lock|unlock|reset|move|bags|repair|volume], /audhd paths [detailed|straight], /audhd bankalt [<name>|off|on|clear], /audhd find <item>, /audhd bags [all|close|<name>], /audhd ah [scan|on|off|price <item>], /audhd blocked, /audhd unblock, /audhd where, /audhd guides, /audhd dungeons [name], /audhd extra, /audhd share, /audhd report, /audhd log")
+    local parts = {}
+    for _, h in ipairs(HELP) do if not h[2] or ns[h[2]] then parts[#parts + 1] = "/audhd " .. h[1] end end
+    say(table.concat(parts, ", "))
   end
 end
 

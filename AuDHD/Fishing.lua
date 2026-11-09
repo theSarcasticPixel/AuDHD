@@ -225,10 +225,14 @@ local function make()
     -- nothing while something is being cast (the lure going on: a second click mustn't cut it short)
     local busy = UnitCastingInfo and UnitCastingInfo("player")
     self:SetAttribute("type", quickClick() and not busy and "macro" or nil)
-    -- no lure on the pole and one in your bags: this click puts it on, the next one casts
-    local lure = lureToUse()
+    -- +fishing food in your bags and its buff not on you: this click eats it (nothing while you're still eating); then
+    -- no lure on the pole and one in your bags: this click puts it on; then the cast
+    local food = ns.fishGear and ns.fishGear.food()
+    if food == "wait" then self:SetAttribute("type", nil) return end
+    local lure = not food and lureToUse()
     local name = spellName()
-    if lure then self:SetAttribute("macrotext", "/use item:" .. lure .. "\n/use 16")
+    if food then self:SetAttribute("macrotext", "/use item:" .. food)
+    elseif lure then self:SetAttribute("macrotext", "/use item:" .. lure .. "\n/use 16")
     elseif name then self:SetAttribute("macrotext", "/cast " .. name) end
   end)
   castButton:SetScript("PostClick", function(self)
@@ -387,6 +391,10 @@ local function bestLure(rank)
   return 0
 end
 F.bestLure = bestLure
+function F.isLure(id)
+  for _, l in ipairs(LURES) do if l[1] == id then return true end end
+  return false
+end
 local function levelColor(need, rank, total)
   local reach = rank + math.max(total - rank, bestLure(rank))
   if reach < need then return "|cffff1919", "too high" end
@@ -473,13 +481,16 @@ local function status()
     "skill: " .. tostring(skill() or "can't read it"),
     "lure: " .. (AuDHDDB.fishLureOff and "off" or (GetWeaponEnchantInfo and GetWeaponEnchantInfo()) and "one on the pole"
       or (function() local id = lureToUse() return id and ("item " .. id .. " next click") or "none in the bags" end)()),
+    "food: " .. (AuDHDDB.fishFoodOff and "off" or tostring(ns.fishGear and ns.fishGear.food() or "none to have now")),
+    "gear: " .. (AuDHDDB.fishGearOff and "off" or "on") .. (ns.fishGear and ns.fishGear.busy() and ", swapping" or ""),
     "set up: " .. (owner and castButton and "yes" or "no") .. ", cast: " .. tostring(castButton and castButton:GetAttribute("macrotext")),
   }
   if mouseKey() == "BUTTON2" and somethingThere() then parts[#parts + 1] = "the right button is left alone: something is under the cursor" end
   return "fishing: " .. table.concat(parts, "; ")
 end
 
--- /audhd fish [on|off|right|middle|4|5|status|loud on|off|volume <10-100>|lure on|off|zone on|off|map on|off]
+-- /audhd fish [on|off|right|middle|4|5|status|go|loud on|off|volume <10-100>|lure on|off|zone on|off|map on|off|gear on|off|
+-- food on|off|button on|off]
 function F.command(arg)
   arg = (arg or ""):lower()
   if arg == "status" then return status() end
@@ -491,11 +502,17 @@ function F.command(arg)
     if AuDHDDB.fishSound and SetCVar then pcall(SetCVar, "Sound_SFXVolume", ("%.2f"):format(vol / 100)) end
     return ("splash volume %d%%"):format(vol)
   end
-  for word, key in pairs({ lure = "fishLureOff", zone = "fishZoneOff", map = "fishMapOff" }) do
+  if arg == "go" then
+    if ns.fishGear then ns.fishGear.go() end
+    return "fishing gear: swapping"
+  end
+  for word, key in pairs({ lure = "fishLureOff", zone = "fishZoneOff", map = "fishMapOff", gear = "fishGearOff",
+                           food = "fishFoodOff", button = "fishBtnOff" }) do
     local v = arg:match("^" .. word .. "%s*(%a*)$")
     if v then
       if v == "on" or v == "off" then AuDHDDB[key] = v == "off" or nil end
       showLevels()
+      if ns.fishGear then ns.fishGear.check() ns.fishGear.show() end
       return ("fishing %s: %s"):format(word, AuDHDDB[key] and "off" or "on")
     end
   end
@@ -521,4 +538,7 @@ function F.volume() return AuDHDDB.fishVolume or 100 end
 function F.lureOn() return not AuDHDDB.fishLureOff end
 function F.zoneOn() return not AuDHDDB.fishZoneOff end
 function F.mapOn() return not AuDHDDB.fishMapOff end
+function F.foodOn() return not AuDHDDB.fishFoodOff end
+function F.gearOn() return not AuDHDDB.fishGearOff end
+function F.goButtonOn() return not AuDHDDB.fishBtnOff end
 function F.button() return mouseKey() end

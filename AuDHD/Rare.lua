@@ -110,7 +110,11 @@ end
 R.wanted = wanted
 
 local seen = {}   -- GUID -> when we alerted
-local function mode() return AuDHDDB.rares or "all" end   -- all | route | off
+local function mode()   -- all | route | off (route only with a guide to follow)
+  local m = AuDHDDB.rares or "all"
+  if m == "route" and not ns.guide then return "all" end
+  return m
+end
 
 function R.alert(guid, npc, name, how)
   if mode() == "off" then return end
@@ -179,7 +183,7 @@ end
 -- : every rare's spawn points (RareData.lua). One pop-up per rare as you come within NEAR yards of one of its spawn
 -- points; it can pop up again once you've been REARM yards from all of them. Rares far below your level (GREY levels)
 -- only when the route needs them.
-local NEAR, REARM, GREY = 200, 500, 8
+local NEAR, REARM, GREY = 100, 500, 8
 local where      -- npc -> { { c, x, y } } its spawn points in world coordinates (worked out once)
 local armed = {} -- npc -> false after its pop-up, until you're REARM yards away
 local function spawnWorld()
@@ -249,10 +253,11 @@ end
 
 -- ------------------------------------------------------------------ the target button
 -- : a secure macro button - your click runs "/tar <name>", as if you typed it; the addon itself never targets. Secure
--- buttons can't be changed in combat: a rare found then gets its button when the fight ends. It stays until its x.
+-- buttons can't be changed in combat: a rare found then gets its button when the fight ends. It stays until its x,
+-- which closes it in combat too (a secure snippet hides it and drops the wheel's bindings).
 -- Several near: each click targets one and
 -- moves on to the next (not in combat: the button can't change then). Drag to move.
-local button, wheel, wheelToggle
+local button, wheel, wheelToggle, closer
 -- the rares near you, in the order found: { npc, name, at }; the button targets list[idx], and each click moves it on
 -- to the next
 local list, idx, dirty = {}, 1, false
@@ -269,17 +274,17 @@ local function clicked(self, down, sound)
 end
 
 -- the mouse wheel: an unseen secure button with the same macro, the wheel bound to it while the rare button shows
--- (override bindings, owned by it: the wheel zooms again once it's gone). Bindings can't change in combat: then after
--- it.
+-- (override bindings, owned by the x: its secure snippet clears them, in combat too; the wheel zooms again once it's
+-- gone). Otherwise bindings can't change in combat: then after it.
 local function wheelOn() return AuDHDDB.rareWheel and #list > 0 end
 function R.applyWheel()
   if not wheel then return end
   if InCombatLockdown() then dirty = true return end
   if ClearOverrideBindings and SetOverrideBindingClick then
-    ClearOverrideBindings(wheel)
+    ClearOverrideBindings(closer)
     if wheelOn() then
-      SetOverrideBindingClick(wheel, true, "MOUSEWHEELUP", "AuDHDRareWheel")
-      SetOverrideBindingClick(wheel, true, "MOUSEWHEELDOWN", "AuDHDRareWheel")
+      SetOverrideBindingClick(closer, true, "MOUSEWHEELUP", "AuDHDRareWheel")
+      SetOverrideBindingClick(closer, true, "MOUSEWHEELDOWN", "AuDHDRareWheel")
     end
   end
   if wheelToggle then
@@ -355,10 +360,16 @@ local function makeButton()
   end)
   button.status = button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   button.status:SetPoint("TOP", button, "BOTTOM", 0, -4)
-  local close =ns.newFrame("Rare", "Button", nil, button, "UIPanelCloseButton")
+  -- the x: a secure click, so it can hide the (secure) button and clear the wheel's bindings in combat; the list
+  -- empties after it
+  local ok, close = pcall(ns.newFrame, "Rare", "Button", nil, button, "UIPanelCloseButtonNoScripts,SecureHandlerClickTemplate")
+  if not ok then close = ns.newFrame("Rare", "Button", nil, button, "UIPanelCloseButton,SecureHandlerClickTemplate") end
+  closer = close
   close:SetSize(24, 24)
   close:SetPoint("RIGHT", -8, 0)
-  close:SetScript("OnClick", function() R.hideButton() end)
+  close:SetFrameRef("rare", button)
+  close:SetAttribute("_onclick", [[ self:ClearBindings() self:GetFrameRef("rare"):Hide() ]])
+  close:HookScript("OnClick", function() R.hideButton() end)
   -- the wheel toggle: on (lit, green) the mouse wheel targets too; again to go back to clicks only
   wheelToggle = ns.newFrame("Rare", "Button", nil, button, "UIPanelButtonTemplate")
   wheelToggle:SetSize(54, 24)
@@ -508,7 +519,8 @@ end
 
 -- /audhd rares all | route | off
 function R.command(rest)
-  if rest == "all" or rest == "route" or rest == "off" then AuDHDDB.rares = rest end
+  if rest == "all" or (rest == "route" and ns.guide) or rest == "off" then AuDHDDB.rares = rest end
+  if not ns.guide then return ("rare alerts: %s (/audhd rares all | off)"):format(mode()) end
   local names = {}
   for npc, w in pairs(routeRares()) do
     if wanted(npc) then names[#names + 1] = w.n end

@@ -23,29 +23,29 @@ end
 -- the Dungeons tab: the heads-up, then a switch per dungeon the leveling guides have steps for (per character)
 local function dungeonRows()
   local out = {
-    { "Tell me when a dungeon opens up", function() return AuDHDDB.dungeonHeadsUp and true or false end,
+    { need = "dungeons", "Tell me when a dungeon opens up", function() return AuDHDDB.dungeonHeadsUp and true or false end,
       function(on) AuDHDDB.dungeonHeadsUp = on or nil end,
       "After a level-up that opens a dungeon's quests to you, once per dungeon on each character: how many to pick up and what they're worth, with a button that picks them up" },
-    { "Dungeons in the leveling guides (this character)" },
-    { note = "Off: the guides keep to the solo route. On: they take you through that dungeon where they have steps for it. The dungeon quests window: /audhd dungeons, or Alt-click the minimap button" },
+    { need = "dungeons", "Dungeons in the leveling guides (this character)" },
+    { need = "dungeons", note = "Off: the guides keep to the solo route. On: they take you through that dungeon where they have steps for it. The dungeon quests window: /audhd dungeons, or Alt-click the minimap button" },
   }
   for _, d in ipairs(ns.dungeons and ns.dungeons.ROUTE or {}) do
     local map = d[1]
-    out[#out + 1] = { d[2] .. (d[3] and (" |cffaaaaaa(" .. d[3] .. ")|r") or ""), function() return ns.dungeons.chosen(map) end,
+    out[#out + 1] = { need = "dungeons", d[2] .. (d[3] and (" |cffaaaaaa(" .. d[3] .. ")|r") or ""), function() return ns.dungeons.chosen(map) end,
       function(on) ns.dungeons.choose(map, on) end }
   end
   return out
 end
 local TABS = {
   { "User Interface", {
-    { "Route window", function() local f = _G.AuDHDFrame return f and f:IsShown() end,
+    { need = "ui", "Route window", function() local f = _G.AuDHDFrame return f and f:IsShown() end,
       function(on) local f = _G.AuDHDFrame if f and f:IsShown() ~= on then ns.ui.toggle() end end },
-    { "Hide the game's quest list with the route window", function() return AuDHDDB.hideTracker end,
+    { need = "ui", "Hide the game's quest list with the route window", function() return AuDHDDB.hideTracker end,
       function(on) AuDHDDB.hideTracker = on or nil if ns.ui then ns.ui.applyTracker() end end,
       "All Objectives goes away while the route window is showing, and comes back when you hide the window" },
-    { "Arrow", function() return not sub("arrow").hidden end, function(on) ns.arrow.command(on and "show" or "hide") end },
-    { slider = "arrow" },
-    { "Lock the arrow", function() return sub("arrow").locked end, function(on) ns.arrow.command(on and "lock" or "unlock") end,
+    { need = "arrow", "Arrow", function() return not sub("arrow").hidden end, function(on) ns.arrow.command(on and "show" or "hide") end },
+    { need = "arrow", slider = "arrow" },
+    { need = "arrow", "Lock the arrow", function() return sub("arrow").locked end, function(on) ns.arrow.command(on and "lock" or "unlock") end,
       "Locked: clicks go through it, and it can't be dragged" },
     { "Range guide", function() return not sub("range").hidden end,
       function(on) if ns.range then ns.range.command(on and "show" or "hide") end end },
@@ -57,15 +57,15 @@ local TABS = {
         if ns.minimap then ns.minimap.apply() end end, "Off: /audhd minimap brings it back" },
     { "Threat on nameplates", function() return not AuDHDDB.threatHidden end,
       function(on) if ns.threat then ns.threat.command(on and "on" or "off") end end },
-    { "Listen button (with Chronicle)", function() return not AuDHDDB.chronicleOff end,
+    { need = "ui", "Listen button (with Chronicle)", function() return not AuDHDDB.chronicleOff end,
       function(on) AuDHDDB.chronicleOff = not on or nil if ns.ui then ns.ui.refresh() end end,
       "When the Chronicle addon is installed: a button on the route window that has Chronicle read the current step's quest out. AuDHD has no voices of its own" },
-    { "Welcome-back message in chat", function() return not AuDHDDB.welcomeOff end,
+    { need = "track", "Welcome-back message in chat", function() return not AuDHDDB.welcomeOff end,
       function(on) AuDHDDB.welcomeOff = not on or nil end,
       "At login, a line in chat saying which step you're on and how far away it is" },
     { "Reagent bag opens with the backpack", function() return not ns.altItems or ns.altItems.reagentOn() end,
       function(on) if ns.altItems then ns.altItems.setReagent(on) end end,
-      "Opening your bags opens the reagent bag too, and closing them closes it" },
+      "B opens your reagent bag with the backpack (the game's Open All Bags). Only when B opens your bags now" },
   } },
   { "Gold and XP bar", {
     { "Show the bar", function() return ns.stats and ns.stats.isShown() end,
@@ -74,7 +74,7 @@ local TABS = {
     { "Lock the bar", function() return ns.stats and ns.stats.isLocked() end,
       function(on) if ns.stats then ns.stats.command(on and "lock" or "unlock") end end },
     { "  ...free bag slots", function() return ns.stats and ns.stats.partShown("bags") end,
-      function(on) if ns.stats then ns.stats.setPart("bags", on) end end, "Click it to open your bags" },
+      function(on) if ns.stats then ns.stats.setPart("bags", on) end end },
     { "    ...as slots used (off: slots free)", function() return ns.stats and ns.stats.bagsUsed() end,
       function(on) if ns.stats then ns.stats.setBagsUsed(on) end end,
       "On: 37/40 when 37 of your 40 slots are full. Off: 3/40, the slots still free" },
@@ -90,32 +90,32 @@ local TABS = {
       "\"All:\" and the total, left of this character's own money at the bottom of your backpack" },
   } },
   { "Maps", {
-    { "Joined-up world map (work in progress)", function() return ns.atlas and ns.atlas.isOn() end,
+    { need = "atlas", "Joined-up world map (work in progress)", function() return ns.atlas and ns.atlas.isOn() end,
       function(on) if ns.atlas then print("AuDHD: " .. ns.atlas.command(on and "on" or "off")) end end,
       "The game's world map with every zone's painting joined into one: zoom from the whole world down to the minimap's pictures with the wheel, drag past a map's edge into the next. The quest log and everything else on the map stay.\n\n|cffff9933Work in progress: not tested in game yet.|r It may show errors or look wrong; untick this (or /audhd atlas off) to go back to the normal map." },
-    { "Detailed map (the minimap's pictures)", function() return ns.bigmap and ns.bigmap.isOn() end,
+    { need = "bigmap", "Detailed map (the minimap's pictures)", function() return ns.bigmap and ns.bigmap.isOn() end,
       function(on) if ns.bigmap then ns.bigmap.set(on) end end,
       "A big map of the open world drawn from the game's own minimap pictures, with you and your route on it. Open it with /audhd bigmap or a key in Key Bindings (AuDHD: Detailed map). Drag to move around, scroll to zoom" },
-    { "  ...instead of the world map", function() return ns.bigmap and ns.bigmap.replaces() end,
+    { need = "bigmap", "  ...instead of the world map", function() return ns.bigmap and ns.bigmap.replaces() end,
       function(on) if ns.bigmap then ns.bigmap.setReplace(on) end end,
       "Your world map key (M) opens the detailed map; its Game map button opens the game's own" },
-    { "  ...the game's painted map when zoomed out", function() return ns.bigmap and ns.bigmap.artOn() end,
+    { need = "bigmap", "  ...the game's painted map when zoomed out", function() return ns.bigmap and ns.bigmap.artOn() end,
       function(on) if ns.bigmap then ns.bigmap.setArt(on) end end,
       "Zoomed out, the detailed map shows the game's painted continent map, fading into the minimap's pictures as you zoom in; zoomed in, the cities the minimap's pictures don't show (Ironforge, Undercity, Stormwind, Orgrimmar) come from the game's city maps" },
-    { "Route on the world map and minimap", function() return not AuDHDDB.mapHidden end,
+    { need = "routemap", "Route on the world map and minimap", function() return not AuDHDDB.mapHidden end,
       function(on) AuDHDDB.mapHidden = not on or nil if ns.routemap then pcall(ns.routemap.refresh) end end },
     -- detailed walking paths, or a straight line to the next spot
-    { "  ...walking paths (off: straight lines)", function() return AuDHDDB.pathStyle ~= "straight" end,
+    { need = "walk", "  ...walking paths (off: straight lines)", function() return AuDHDDB.pathStyle ~= "straight" end,
       function(on) if ns.walk then ns.walk.setStyle(on and "detailed" or "straight") end end,
       "On: the way over the ground, round hills and water. Off: a straight line to each spot (the arrow too); flights still used" },
     -- one of three
-    { "Where the step's mobs are: a ring per camp", function() return ns.routemap and ns.routemap.spawnMode() == "camps" end,
+    { need = "routemap", "Where the step's mobs are: a ring per camp", function() return ns.routemap and ns.routemap.spawnMode() == "camps" end,
       function() if ns.routemap then ns.routemap.setSpawnMode("camps") end end,
       "On the world map and minimap, in each objective's colour from the guide window: a ring for each place a group of them stands" },
-    { "Where the step's mobs are: a dot per spawn", function() return ns.routemap and ns.routemap.spawnMode() == "each" end,
+    { need = "routemap", "Where the step's mobs are: a dot per spawn", function() return ns.routemap and ns.routemap.spawnMode() == "each" end,
       function(on) if ns.routemap then ns.routemap.setSpawnMode(on and "each" or "camps") end end,
       "A dot for every single spawn of the step's mobs and objects (busy places get crowded)" },
-    { "Where the step's mobs are: none", function() return ns.routemap and ns.routemap.spawnMode() == "off" end,
+    { need = "routemap", "Where the step's mobs are: none", function() return ns.routemap and ns.routemap.spawnMode() == "off" end,
       function(on) if ns.routemap then ns.routemap.setSpawnMode(on and "off" or "camps") end end },
   } },
   { "Automation", {
@@ -149,7 +149,7 @@ local TABS = {
     { "Profession trainer reminder", function() return not AuDHDDB.profTrainOff end,
       function(on) AuDHDDB.profTrainOff = not on or nil if ns.services then ns.services.check() end end,
       "Within 500 yards of a trainer who teaches the next rank of a profession you have, once your skill and level are high enough" },
-    { "Quest item button", function() return not AuDHDDB.useItemOff end,
+    { need = "useItem", "Quest item button", function() return not AuDHDDB.useItemOff end,
       function(on) AuDHDDB.useItemOff = not on or nil if ns.useItem then ns.useItem.refresh() end end,
       "A button for the item the current step needs you to use" },
     { "Quest complete message", function() return not AuDHDDB.announceOff end,
@@ -158,11 +158,14 @@ local TABS = {
     { "  ...and tell my party", function() return not AuDHDDB.announcePartyOff end,
       function(on) if ns.questDone then ns.questDone.command("party " .. (on and "on" or "off")) end end,
       "Also sends it to party chat when you're in a group" },
-    { "Class quest reminder", function() return not AuDHDDB.classQuestOff end,
+    { need = "classQuest", "Class quest reminder", function() return not AuDHDDB.classQuestOff end,
       function(on) AuDHDDB.classQuestOff = not on or nil if ns.classQuest then ns.classQuest.check() end end,
       "Reaching the level of a class quest the leveling routes leave out: swap to its guide, put it off, or say no to it. Your route waits where you left it" },
     { "Drop chances on mob tooltips", function() return not AuDHDDB.dropsOff end,
       function(on) AuDHDDB.dropsOff = not on or nil end },
+    { "Quest names on quest item tooltips", function() return not AuDHDDB.questItemTipOff end,
+      function(on) AuDHDDB.questItemTipOff = not on or nil end,
+      "Each quest the item is for, and whether you're on it, it's ready to hand in or it's handed in" },
     { "Reminder sound" },
     { "Play a sound with reminders", function() return ns.sound.on() end,
       function(on) AuDHDDB.alertSoundOff = not on or nil if not on and AuDHDSoundPick then AuDHDSoundPick:Hide() end end,
@@ -184,9 +187,9 @@ local TABS = {
     { "Show what my characters carry on item tooltips", function() return not ns.altItems or ns.altItems.on() end,
       function(on) if ns.altItems then ns.altItems.setOn(on) end end,
       "Item tooltips list which of your characters on this realm have one, in their bags, bank or mail (not worn gear). Find an item... searches them all" },
-    { "Alts button on the backpack", function() return not ns.altItems or ns.altItems.bagsButtonOn() end,
+    { "Alts and Bank buttons on the backpack", function() return not ns.altItems or ns.altItems.bagsButtonOn() end,
       function(on) if ns.altItems then ns.altItems.setBagsButton(on) end end,
-      "Pick one of your characters and see their bags, bank or mail as if they were yours, or Show all. Also /audhd bags" },
+      "Alts: pick one of your characters and see their bags, bank or mail as if they were yours, or Show all. Also /audhd bags. Bank: your own bank, as it was when you last closed it. Shift-B opens your bags and bank together" },
   }, extra = "altmail" },
   -- the auction house
   { "Auction house", {
@@ -199,6 +202,9 @@ local TABS = {
     { "Auction prices on item tooltips", function() return not ns.auction or ns.auction.tipsOn() end,
       function(on) if ns.auction then ns.auction.set("ahTipsOff", on) end end,
       "The cheapest price each from your last scan or search, and when it was seen" },
+    { "Item values on trainer recipes", function() return not ns.trainerValue or ns.trainerValue.on() end,
+      function(on) AuDHDDB.trainerValueOff = not on or nil end,
+      "At a profession trainer, a recipe's tooltip shows what the item it makes fetches at a vendor, at auction and disenchanted, what its reagents cost at auction, and the return" },
     { "Remind me to sell near an auctioneer", function() return not ns.auction or ns.auction.remindOn() end,
       function(on) if ns.auction then ns.auction.set("ahRemindOff", on) end end,
       "Only when you are already by an auctioneer in a city, and your bags hold things worth at least 50s more there than a vendor pays. Never a detour" },
@@ -216,7 +222,7 @@ local TABS = {
   { "Rares", {
     { "Alerts for every rare", function() return (AuDHDDB.rares or "all") == "all" end,
       function() ns.rare.command("all") end, "A pop-up and the /tar button near any rare's spawn point" },
-    { "Alerts only for the route's rares", function() return AuDHDDB.rares == "route" end,
+    { need = "guide", "Alerts only for the route's rares", function() return AuDHDDB.rares == "route" end,
       function(on) ns.rare.command(on and "route" or "all") end },
     { "No rare alerts", function() return AuDHDDB.rares == "off" end, function(on) ns.rare.command(on and "off" or "all") end },
     { "Mouse wheel targets rares", function() return AuDHDDB.rareWheel end,
@@ -251,6 +257,15 @@ local TABS = {
     { "Put on a lure first", function() return ns.fishing and ns.fishing.lureOn() end,
       function(on) if ns.fishing then ns.fishing.command("lure " .. (on and "on" or "off")) end end,
       "No lure on the pole and one in your bags: the click puts the best one your skill can use on, the next click casts" },
+    { "Fishing food first", function() return ns.fishing and ns.fishing.foodOn() end,
+      function(on) if ns.fishing then ns.fishing.command("food " .. (on and "on" or "off")) end end,
+      "Food or drink that gives +fishing in your bags and its buff not on you: the click has it before the lure and the cast" },
+    { "Fishing gear with the pole", function() return ns.fishing and ns.fishing.gearOn() end,
+      function(on) if ns.fishing then ns.fishing.command("gear " .. (on and "on" or "off")) end end,
+      "While a pole is in your hands, the best +fishing gear in your bags goes on; your own goes back when the pole comes off" },
+    { "Go fishing button", function() return ns.fishing and ns.fishing.goButtonOn() end,
+      function(on) if ns.fishing then ns.fishing.command("button " .. (on and "on" or "off")) end end,
+      "A round button, shown while you have a fishing pole: the best pole and gear on, press again for your own back. Drag it to move it. A key for it: Key Bindings, AuDHD, Go fishing" },
     { "Fishing level" },
     { "Under the minimap (with a pole)", function() return ns.fishing and ns.fishing.zoneOn() end,
       function(on) if ns.fishing then ns.fishing.command("zone " .. (on and "on" or "off")) end end,
@@ -277,7 +292,7 @@ local TABS = {
     { note = "Press Report a problem below (or Ctrl-click the minimap button, or /audhd report). Say what went wrong, press Make report, then Select all and Ctrl+C, and paste it into a new GitHub issue or a CurseForge comment. It holds the last 30 minutes of what AuDHD saw, without character names, realm or account." },
     { "Logging a quest" },
     { note = "When AuDHD doesn't know where a quest's mob or objective is, it asks you to log that quest while you do it. A drop chance that says \"Unsure, please upload logged data\" needs the same." },
-    { note = "To log one yourself: click [log] after the quest in the route window (it says [logging] while it does: click again to stop). It records your kills, loot and objective progress, and where each happened, until you turn the quest in or abandon it." },
+    { need = "ui", note = "To log one yourself: click [log] after the quest in the route window (it says [logging] while it does: click again to stop). It records your kills, loot and objective progress, and where each happened, until you turn the quest in or abandon it." },
     { note = "/audhd share list: the quests you've logged.  /audhd share stop: stop logging.  /audhd share show <quest ID>: the log as text to copy." },
     { "Sending a log" },
     { note = "Open /audhd share show, press Select all, then Ctrl+C. Paste it into a new issue on GitHub, or a comment on the CurseForge page (links below). The text has no character names, realm or account: only race, class, level and build." },
@@ -288,10 +303,10 @@ local TABS = {
 local checks = {}
 local function refresh()
   for _, c in ipairs(checks) do c:SetChecked(c.get() and true or false) end
-  if frame and frame.arrowScale then
+  if frame then
     -- the saved size (moving the slider here mustn't write it back)
     frame.syncing = true
-    frame.arrowScale:SetValue((AuDHDDB.arrow and AuDHDDB.arrow.scale) or 1)
+    if ns.arrow and frame.arrowScale then frame.arrowScale:SetValue((AuDHDDB.arrow and AuDHDDB.arrow.scale) or 1) end
     if frame.rangeGap and ns.range then frame.rangeGap:SetValue(sub("range").gap or ns.range.PLATE_GAP) end
     if frame.splash and ns.fishing then frame.splash:SetValue(ns.fishing.volume()) end
     if frame.shardMax and ns.shards then
@@ -319,9 +334,13 @@ local function heading(page, text, y)
 end
 
 local SLIDERS = {}   -- { slider = name } rows: below, with the slider itself
+-- a row with need = "<part>" shows only when that part of the addon is there (ns[part])
+local function present(it) return not it.need or ns[it.need] ~= nil end
 local function rows(page, items, y)
   for _, it in ipairs(items) do
-    if it.note then
+    if not present(it) then
+      -- (that part isn't in this addon)
+    elseif it.note then
       local n = page:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
       n:SetPoint("TOPLEFT", PAGE_X, y - 4)
       n:SetWidth(COL - 10)
@@ -1103,6 +1122,12 @@ local function create()
   local close = ns.newFrame("Settings", "Button", nil, frame, "UIPanelCloseButton")
   close:SetPoint("TOPRIGHT", -2, -2)
   close:SetScript("OnClick", function() frame:Hide() end)
+  -- a tab with no setting left to show goes
+  for i = #TABS, 1, -1 do
+    local any = false
+    for _, it in ipairs(TABS[i][2]) do if present(it) and (it[2] or it.slider) then any = true break end end
+    if not any then table.remove(TABS, i) end
+  end
   -- the tab buttons first: their names' width sets the list's
   frame.tabs = {}
   local widest = 0
@@ -1142,6 +1167,7 @@ local function create()
   routes:SetSize(110, 22)
   routes:SetPoint("TOPLEFT", 12, bottom)
   routes:SetText("Pick a route")
+  routes:SetShown(ns.picker ~= nil)
   routes:SetScript("OnClick", function()
     if not ns.picker then return end
     frame:Hide()
@@ -1149,7 +1175,7 @@ local function create()
   end)
   local heals = ns.newFrame("Settings", "Button", nil, frame, "UIPanelButtonTemplate")
   heals:SetSize(130, 22)
-  heals:SetPoint("LEFT", routes, "RIGHT", 8, 0)
+  if ns.picker then heals:SetPoint("LEFT", routes, "RIGHT", 8, 0) else heals:SetPoint("TOPLEFT", 12, bottom) end
   heals:SetText("Click-cast spells")
   heals:SetScript("OnClick", function()
     if not ns.heal then return end

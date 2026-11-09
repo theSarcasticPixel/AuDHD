@@ -187,3 +187,89 @@ if TooltipDataProcessor and Enum and Enum.TooltipDataType then
 elseif GameTooltip then
   GameTooltip:HookScript("OnTooltipSetUnit", function(tooltip) pcall(addLines, tooltip) end)
 end
+
+-- ------------------------------------------------------------------ quest items
+-- Item tooltips: each quest the item is for (ns.questItems) and where you are with it: your count while it's in your
+-- log, ready to hand in, handed in, or not on it. Only quests your character can take; while the quest data isn't
+-- loaded, only the ones in your log or handed in.
+local SHOWN = 4   -- quest lines at most, past the ones you're on: the rest as "and N more quests"
+
+local ctx
+local function canTake(q)
+  local Q = AuDHDEngine and AuDHDEngine.QuestDB
+  if not (Q and Q.IsLoaded and Q.IsLoaded()) then return false end
+  local r = Q.QuestRecord(q)
+  if not r then return false end
+  ctx = ctx or Q.PlayerContext()
+  return Q.IsEligible(r, ctx)
+end
+local function handedIn(q)
+  local f = C_QuestLog.IsQuestFlaggedCompleted or IsQuestFlaggedCompleted
+  return f and f(q) and true or false
+end
+local function ready(q)
+  if C_QuestLog.ReadyForTurnIn and C_QuestLog.ReadyForTurnIn(q) then return true end
+  return C_QuestLog.IsComplete and C_QuestLog.IsComplete(q) and true or false
+end
+-- your count of the item called name for q: have, need (nil when no objective names it)
+local function progress(q, name)
+  if not name then return nil end
+  local ok, objs = pcall(C_QuestLog.GetQuestObjectives, q)
+  if not ok or type(objs) ~= "table" then return nil end
+  for _, o in ipairs(objs) do
+    if o.text and not isSecret(o.text) and o.text:find(name, 1, true) and (o.numRequired or 0) > 0 then
+      return o.numFulfilled or 0, o.numRequired
+    end
+  end
+end
+local function questTitle(q)
+  local Q = AuDHDEngine and AuDHDEngine.QuestDB
+  return C_QuestLog.GetTitleForQuestID(q) or (Q and Q.GetQuestTitle and Q.GetQuestTitle(q)) or ("Quest " .. q)
+end
+
+-- the lines for item itemID (called name): { { title, state, r, g, b } }, and how many more quests weren't shown
+function D.itemLines(itemID, name)
+  local rows = {}
+  for _, q in ipairs(ns.questItems and ns.questItems[itemID] or {}) do
+    local row
+    if C_QuestLog.IsOnQuest(q) then
+      local have, need = progress(q, name)
+      if ready(q) then row = { 1, q, "Ready to hand in", 0.25, 1, 0.25 }
+      elseif have then row = { 1, q, ("On it: %d/%d"):format(have, need), 1, 1, 1 }
+      else row = { 1, q, "On it", 1, 1, 1 } end
+    elseif handedIn(q) then row = { 3, q, "Handed in", 0.6, 0.6, 0.6 }
+    elseif canTake(q) then row = { 2, q, "Not on this quest", 0.6, 0.6, 0.6 } end
+    if row then rows[#rows + 1] = row end
+  end
+  table.sort(rows, function(a, b) if a[1] ~= b[1] then return a[1] < b[1] end return a[2] < b[2] end)
+  local on = 0
+  for _, r in ipairs(rows) do if r[1] == 1 then on = on + 1 end end
+  local out = {}
+  for i = 1, math.min(#rows, math.max(SHOWN, on)) do
+    local r = rows[i]
+    out[i] = { questTitle(r[2]), r[3], r[4], r[5], r[6] }
+  end
+  return out, #rows - #out
+end
+local function addItemLines(tooltip, data)
+  if (tooltip ~= GameTooltip and tooltip ~= ItemRefTooltip) or (AuDHDDB and AuDHDDB.questItemTipOff) then return end
+  local name, link = tooltip:GetItem()
+  local id = data and data.id
+  if not id and link and not isSecret(link) then id = tonumber(link:match("item:(%d+)")) end
+  if not (id and ns.questItems and ns.questItems[id]) then return end
+  if name and isSecret(name) then name = nil end
+  local lines, more = D.itemLines(id, name)
+  for _, l in ipairs(lines) do tooltip:AddDoubleLine(l[1], l[2], 1, 0.82, 0, l[3], l[4], l[5]) end
+  if more > 0 then tooltip:AddLine(("and %d more quests"):format(more), 0.6, 0.6, 0.6) end
+end
+
+if TooltipDataProcessor and Enum and Enum.TooltipDataType then
+  TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tooltip, data)
+    local ok, err = pcall(addItemLines, tooltip, data)
+    if not ok and ns.log then ns.log.add("TOOLTIP_ERROR", { err = tostring(err) }) end
+  end)
+else
+  for _, tip in ipairs({ GameTooltip, ItemRefTooltip }) do
+    tip:HookScript("OnTooltipSetItem", function(tooltip) pcall(addItemLines, tooltip) end)
+  end
+end

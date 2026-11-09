@@ -279,7 +279,6 @@ local TIPS = {
     tt:AddLine("Bags")
     tt:AddLine(("%d free, %d used, of %d (quivers, ammo pouches and soul bags not counted)"):format(free or 0,
       (total or 0) - (free or 0), total or 0), W, W, W, true)
-    tt:AddLine("Click: open your bags", 0.6, 0.6, 0.6)
   end,
   repair = function(tt)
     local low, worn = S.durability()
@@ -326,10 +325,7 @@ local function segment(i)
   b:SetScript("OnDragStop", stopMove)
   b:SetScript("OnClick", function(self, button)
     if button == "RightButton" then S.reset() return end
-    if self.key == "volume" then S.toggleMute()
-    elseif self.key == "bags" then
-      if ToggleAllBags then ToggleAllBags() elseif OpenAllBags then OpenAllBags() end
-    end
+    if self.key == "volume" then S.toggleMute() end
   end)
   b:EnableMouseWheel(true)
   b:SetScript("OnMouseWheel", function(self, delta)

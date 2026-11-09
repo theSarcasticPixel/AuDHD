@@ -695,9 +695,21 @@ function G.wants(q)
 end
 
 -- ------------------------------------------------------------------ following a guide
+-- The engine keeps up to MAX_TABS guides open (unseen here: the window shows the one followed) and opens no more once
+-- full. Then the oldest one not followed closes for the new one
 function G.follow(id)
   local E = engine()
-  if E then E.OpenTab(id, true) end
+  if E then
+    local tabs, active = E.GetTabs()
+    local open = false
+    for _, t in ipairs(tabs or {}) do if t.guideId == id then open = true end end
+    if not open and #(tabs or {}) >= (E.MAX_TABS or 6) then
+      for i = 1, #tabs do
+        if i ~= active then E.CloseTab(i) break end
+      end
+    end
+    E.OpenTab(id, true)
+  end
   changed()
 end
 function G.start()

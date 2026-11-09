@@ -1,6 +1,6 @@
 -- Asking the party for buffs: in a group with a class that has buffs for you, a bar of buttons, one per buff you could
--- get; a click says to the party "<AuDHD>{star}Hey <name>, could I please get <buff>? <3" (the tag first, so it's plain
--- it's the addon:).; once you have (or have asked for) one per paladin, the blessing buttons go.
+-- get; a click says to the party "Hey <name>, could I please get <buff>? <3"; once you have (or have asked for) one per
+-- paladin, the blessing buttons go.
 -- A buff goes from the bar while it's on you, or for 2 minutes after you asked (back if it never came); one you know
 -- yourself isn't asked for; Intellect, Wisdom and Spirit aren't asked for by warriors and rogues. Plain buttons (chat,
 -- no casting), so they work in a fight too. /audhd askbuffs [off|on].
@@ -146,7 +146,7 @@ function A.choices()
   return out
 end
 
-local function message(c) return ("<AuDHD>{rt1}Hey %s, could I please get %s? <3"):format(c.who.name, c.buff[1]) end
+local function message(c) return ("Hey %s, could I please get %s? <3"):format(c.who.name, c.buff[1]) end
 A.message = message
 function A.ask(c)
   SendChatMessage(message(c), "PARTY")
@@ -202,7 +202,7 @@ local function button(i)
     if not self.c then return end
     GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
     GameTooltip:SetText(("Ask %s for %s"):format(self.c.who.name, self.c.buff[1]), 1, 1, 1)
-    GameTooltip:AddLine((message(self.c):gsub("{rt1}", "* ")), 0.7, 0.7, 0.7, true)
+    GameTooltip:AddLine(message(self.c), 0.7, 0.7, 0.7, true)
     GameTooltip:Show()
   end)
   b:SetScript("OnLeave", function() GameTooltip:Hide() end)

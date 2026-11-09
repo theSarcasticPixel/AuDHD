@@ -70,8 +70,10 @@ function M.create()
       if ns.dungeons then ns.dungeons.toggle() end
     elseif IsShiftKeyDown() then
       if ns.picker then ns.picker.toggle() end
-    else
+    elseif ns.ui then
       M.toggleUI()
+    elseif ns.settings then
+      ns.settings.toggle()
     end
   end)
   button:SetScript("OnDragStart", function(self)
@@ -85,11 +87,15 @@ function M.create()
   button:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_LEFT")
     GameTooltip:SetText("AuDHD")
-    GameTooltip:AddLine("Left-click: show / hide the route window and arrow", 1, 1, 1)
-    GameTooltip:AddLine("Right-click: settings", 1, 1, 1)
-    GameTooltip:AddLine("Shift-click: pick a route", 1, 1, 1)
-    GameTooltip:AddLine("Ctrl-click: report a problem", 1, 1, 1)
-    GameTooltip:AddLine("Alt-click: dungeon quests", 1, 1, 1)
+    if ns.ui then
+      GameTooltip:AddLine("Left-click: show / hide the route window and arrow", 1, 1, 1)
+      GameTooltip:AddLine("Right-click: settings", 1, 1, 1)
+    else
+      GameTooltip:AddLine("Click: settings", 1, 1, 1)
+    end
+    if ns.picker then GameTooltip:AddLine("Shift-click: pick a route", 1, 1, 1) end
+    if ns.share then GameTooltip:AddLine("Ctrl-click: report a problem", 1, 1, 1) end
+    if ns.dungeons then GameTooltip:AddLine("Alt-click: dungeon quests", 1, 1, 1) end
     GameTooltip:AddLine("Drag: move round the minimap", 0.7, 0.7, 0.7)
     GameTooltip:Show()
   end)
