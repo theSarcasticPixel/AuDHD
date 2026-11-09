@@ -75,6 +75,10 @@ ns.routeFixes = {
   -- a note on a goal that's already there
   notes = {
     { guide = HF, t = "turnin", q = 502, note = "Be ready to fight: Stanley turns on you about 9 seconds after this." },
+    -- Kodo Roundup (5561) counts kodos tamed with the Kodo Kombobulator and led back to Smeed, not kodos killed
+    { guide = "forever/alliance/30-40/02-desolace", t = "kill", q = 5561, note = "Use the {item:13892} on an Aged, Dying or Ancient Kodo, then lead it back to Smeed: one at a time" },
+    -- Raene's Cleansing (1046) takes Dartol's Rod of Transformation, and gives it back as a reward
+    { guide = "forever/alliance/30-40/03-ashenvale", t = "turnin", q = 1046, note = "Safe to hand in: you get the {item:5462} back as a reward and keep it" },
   },
   -- new goals, placed straight after the goal named by `after` (t, q) in that guide, or just before the one named by `before`
   add = {

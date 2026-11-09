@@ -880,9 +880,26 @@ local function showRouteBox()
       GameTooltip:Show()
     end)
     routeBox:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    -- in the top right corner, under the fishing level (Fishing.lua), a button listing the quests in your log the route
+    -- ahead doesn't use (Guide.lua)
+    local off = ns.newFrame("RouteMap", "Button", "AuDHDWorldOffRoute", sc, "UIPanelButtonTemplate")
+    off:SetSize(130, 22)
+    off:SetPoint("TOPRIGHT", sc, "TOPRIGHT", -10, -30)
+    off:SetFrameLevel((sc:GetFrameLevel() or 1) + 20)
+    off:SetText("Quests off route")
+    off:SetScript("OnClick", function() if ns.offRoute then ns.offRoute.toggle() end end)
+    off:SetScript("OnEnter", function(self)
+      GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+      GameTooltip:SetText("AuDHD: quests off route")
+      GameTooltip:AddLine("Lists the quests in your log that neither the guide you follow nor any guide after it uses", 1, 1, 1, true)
+      GameTooltip:Show()
+    end)
+    off:SetScript("OnLeave", function() GameTooltip:Hide() end)
+    routeBox.off = off
   end
   routeBox:SetChecked(not AuDHDDB.worldRouteOff)
   routeBox:SetShown(not AuDHDDB.mapHidden)
+  routeBox.off:SetShown(not AuDHDDB.mapHidden)
 end
 R.showRouteBox = showRouteBox
 R.routeBox = function() return routeBox end   -- (the smoke test)

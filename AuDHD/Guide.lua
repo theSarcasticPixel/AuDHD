@@ -40,14 +40,28 @@ local KIND = { accept = "accept", turnin = "turnin", kill = "do", collect = "do"
 local OPEN = { active = true, pending = true }
 
 local function clean(t) return t and (t:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")) or "" end
+-- a kill goal whose quest counts something else for the creature ("Kodos Tamed", not "Aged Kodo slain") reads as the
+-- quest log's objective, then the quest: "Kodos Tamed: 0/5 (Kodo Roundup)"
+local function questWording(g)
+  if g.t ~= "kill" or not (g.quest and g.oi and C_QuestLog and C_QuestLog.GetQuestObjectives) then return nil end
+  local ok, objs = pcall(C_QuestLog.GetQuestObjectives, g.quest)
+  local o = ok and type(objs) == "table" and objs[g.oi]
+  local text = o and type(o.text) == "string" and clean(o.text):gsub("%s*:?%s*%d+%s*/%s*%d+%s*$", "")
+  if not text or text == "" or text:lower():find("slain", 1, true) then return nil end
+  local title = C_QuestLog.GetTitleForQuestID and C_QuestLog.GetTitleForQuestID(g.quest)
+  return text, title
+end
 local function goalLine(g)
   local t = clean(g.text)
+  local own, title = questWording(g)
+  if own then t = own end
   local p = g.progress
   if p and p.kind == "wait" then
     t = ("%s: %d s left"):format(t, p.cur)
   elseif p then
     t = ("%s: %s/%s"):format(t, tostring(p.cur), tostring(p.max))
   end
+  if own and title then t = ("%s (%s)"):format(t, title) end
   if g.optional then t = t .. " (optional)" end
   return t
 end
@@ -386,8 +400,10 @@ end
 -- Steps that are only waypoints (a walk written for someone without the flight path there yet) are ticked off when
 -- going straight to the first step with work after them is clearly faster, flights and the hearth counted by the
 -- router. Faster: the router's time via every waypoint, against straight to the work's first open place, at least
--- WALK_SAVE seconds and WALK_FRAC of it shorter. Looked at again every WALK_LOOK seconds at most
-local WALK_SAVE, WALK_FRAC, WALK_LOOK = 30, 0.2, 10
+-- WALK_SAVE seconds and WALK_FRAC of it shorter. Looked at again every WALK_LOOK seconds at most. The walk's last place
+-- within WAY_IN yards of the work is its way in (a cave's mouth, a door): never ticked off, as the router can't tell the
+-- work is below ground or behind a wall. The walks before it are, timed to the way in
+local WALK_SAVE, WALK_FRAC, WALK_LOOK, WAY_IN = 30, 0.2, 10, 300
 local walkLooked, walkKey
 local function placeOf(goal)
   if goal and goal.map and goal.x and goal.y then return { map = goal.map, x = goal.x, y = goal.y, f = goal.f } end
@@ -434,7 +450,7 @@ function G.flyPastWalks(force)
     local k, what = stepKind(E, g, s)
     if k == "walk" then
       for _, w in ipairs(what) do
-        run[#run + 1] = { s = s, n = w.n }
+        run[#run + 1] = { s = s, n = w.n, p = w.p }
         if w.p then points[#points + 1] = w.p end
       end
     elseif k == "work" then
@@ -443,6 +459,16 @@ function G.flyPastWalks(force)
     end
   end
   if not target or #points == 0 then return false end
+  local wayIn = points[#points]
+  local near = ns.geo.yards(wayIn, target)
+  if near and near <= WAY_IN then
+    points[#points] = nil
+    for k = #run, 1, -1 do
+      if run[k].p == wayIn then table.remove(run, k) break end
+    end
+    target = wayIn
+    if #points == 0 then return false end
+  end
   local via = N.EstimateTravel(nil, points[1])
   for k = 2, #points do
     local leg = via and N.EstimateTravel(points[k - 1], points[k])
@@ -683,6 +709,144 @@ function P.toggle()
   if win and win:IsShown() then win:Hide() else P.show() end
 end
 ns.picker = P
+
+-- ------------------------------------------------------------------ quests in your log the route ahead doesn't use
+-- The route ahead: the guide you follow (all of it) and every guide after it, not those before. Where the next guide is
+-- a choice you haven't made, every option for you. A pick-up, objective or hand-in of a quest there counts (not a step
+-- to abandon it), as do your extra quests and, while a class guide you swapped to is followed, the route it goes back to
+local function routeQuests()
+  local E, Guides, A = engine()
+  local cur = E and E.GetGuide()
+  if not (cur and Guides and A and A.Compat) then return nil end
+  local p = A.Compat.GetPlayerInfo() or {}
+  local chosen = A.CharState and A.CharState().routes or {}
+  local quests, seen, queue = {}, {}, { cur.id }
+  local cq = ns.classQuest and ns.classQuest.state and ns.classQuest.state()
+  local back = cq and cq.back
+  if back and back.from == cur.id and back.to then queue[#queue + 1] = back.to end
+  local i = 1
+  while queue[i] do
+    local id = queue[i]
+    i = i + 1
+    local g = not seen[id] and Guides.Get(id)
+    if g then
+      seen[id] = true
+      pcall(function()
+        for _, step in ipairs(g.steps or {}) do
+          if Guides.Matches(step.only, p) then
+            for _, goal in ipairs(step.goals or {}) do
+              if type(goal.quest) == "number" and goal.t ~= "abandon" and Guides.Matches(goal.only, p) then
+                quests[goal.quest] = true
+              end
+            end
+          end
+        end
+      end)
+      local nexts = g.nextChoices or { g.next }
+      if g.nextChoices then
+        for _, n in ipairs(g.nextChoices) do if n == chosen[g.id] then nexts = { n } end end
+      end
+      for _, n in ipairs(nexts) do
+        local t = Guides.Get(n)
+        if t and Guides.GuideMatches(t, p) then queue[#queue + 1] = n end
+      end
+    end
+  end
+  -- the steps read in go again, but for the guides a tab shows (as the engine does on a tab change)
+  if Guides.ReleaseExcept and E.TabIds then pcall(Guides.ReleaseExcept, E.TabIds()) end
+  for q in pairs(ns.extra and ns.extra.list() or {}) do quests[q] = true end
+  return quests
+end
+-- the quests in your log not in `quests`: { { title, level, zone (the log's header over it) } }, in the log's order
+local function offRoute(quests)
+  local out, zone = {}, nil
+  local ok, count = pcall(C_QuestLog.GetNumQuestLogEntries)
+  for li = 1, (ok and count or 0) do
+    local info = C_QuestLog.GetInfo(li)
+    if info and info.isHeader then zone = info.title
+    elseif info and info.questID and not quests[info.questID] then
+      out[#out + 1] = { q = info.questID, title = info.title or questName(info.questID), level = info.level, zone = zone }
+    end
+  end
+  return out
+end
+G.routeQuests, G.offRoute = routeQuests, offRoute   -- (the smoke test)
+
+local OR = {}
+local orWin, orLines, orQuests = nil, {}, nil
+local function orFill()
+  local list = orQuests and offRoute(orQuests)
+  local texts = {}
+  if not orQuests then
+    texts[1] = { "Follow a guide first: there's no route to check against", "GameFontHighlightSmall" }
+  elseif #list == 0 then
+    texts[1] = { "Every quest in your log is on the route ahead", "GameFontHighlightSmall" }
+  else
+    local zone
+    for _, e in ipairs(list) do
+      if e.zone ~= zone then
+        zone = e.zone
+        texts[#texts + 1] = { zone or "", "GameFontNormal" }
+      end
+      texts[#texts + 1] = { ("  [%s] %s"):format(e.level or "?", e.title), "GameFontHighlightSmall" }
+    end
+  end
+  local y = -2
+  for n, t in ipairs(texts) do
+    local fs = orLines[n]
+    if not fs then
+      fs = orWin.content:CreateFontString(nil, "OVERLAY")
+      fs:SetJustifyH("LEFT")
+      fs:SetWidth(300)
+      orLines[n] = fs
+    end
+    fs:SetFontObject(t[2])
+    fs:SetText(t[1])
+    fs:ClearAllPoints()
+    fs:SetPoint("TOPLEFT", 4, y)
+    fs:Show()
+    y = y - 16
+  end
+  for n = #texts + 1, #orLines do orLines[n]:Hide() end
+  orWin.content:SetHeight(-y + 4)
+  orWin.count:SetText(orQuests and #list > 0 and ("%d not on the route ahead"):format(#list) or "")
+end
+OR.fill = orFill
+function OR.show()
+  if not orWin then
+    orWin = ns.newFrame("Guide", "Frame", "AuDHDOffRoute", UIParent, "BasicFrameTemplateWithInset")
+    orWin:SetSize(340, 320)
+    orWin:SetPoint("CENTER")
+    orWin:SetFrameStrata("DIALOG")
+    orWin:SetMovable(true)
+    orWin:EnableMouse(true)
+    orWin:RegisterForDrag("LeftButton")
+    orWin:SetScript("OnDragStart", orWin.StartMoving)
+    orWin:SetScript("OnDragStop", orWin.StopMovingOrSizing)
+    local title = orWin:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    title:SetPoint("TOP", 0, -6)
+    title:SetText("Quests off the route")
+    orWin.count = orWin:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    orWin.count:SetPoint("BOTTOMLEFT", 12, 10)
+    local scroll = ns.newFrame("Guide", "ScrollFrame", "AuDHDOffRouteScroll", orWin, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", 10, -30)
+    scroll:SetPoint("BOTTOMRIGHT", -30, 28)
+    orWin.content = ns.newFrame("Guide", "Frame", nil, scroll)
+    orWin.content:SetSize(300, 10)
+    scroll:SetScrollChild(orWin.content)
+    -- the list follows the log while it's open (a quest abandoned or taken); the route's quests are read once per opening
+    orWin:RegisterEvent("QUEST_LOG_UPDATE")
+    orWin:SetScript("OnEvent", function() if orWin:IsShown() then orFill() end end)
+    tinsert(UISpecialFrames, "AuDHDOffRoute")
+  end
+  orQuests = routeQuests()
+  orFill()
+  orWin:Show()
+end
+function OR.toggle()
+  if orWin and orWin:IsShown() then orWin:Hide() else OR.show() end
+end
+ns.offRoute = OR
 
 -- ------------------------------------------------------------------ what Auto.lua may accept for you
 -- the live step's quests and your extra quests. A timed quest only when the live step names it: never on the way somewhere.

@@ -357,7 +357,8 @@ local function fishBuffOn()
   return false
 end
 local lastFood
--- the +fishing food or drink to have now (its item id), or "wait" while you're still eating it; nil for none
+-- the +fishing food or drink to have now (its item id), or "wait" while you're still eating it; nil for none. Lures
+-- aren't food
 function G.food()
   if not G.foodOn() or not C_Container then return nil end
   if fishBuffOn() then return nil end
@@ -369,7 +370,8 @@ function G.food()
   eachBagItem(function(link)
     local id = itemID(link)
     local _, classID = info(link)
-    if id and classID == 0 then
+    -- (a lure's "Use:" line names Fishing too, but it goes on the pole, not in you: Fishing.lua puts it on)
+    if id and classID == 0 and not (ns.fishing and ns.fishing.isLure and ns.fishing.isLure(id)) then
       local v = foodCache[id]
       if v == nil then
         local ls = lines("GetHyperlink", link)
