@@ -222,26 +222,66 @@ local function above(cv)
       if l and l > top then top = l end
     end
   end
-  -- (the joined-up map's art is a frame on the canvas with its layers above it: Atlas.lua)
+  -- (the joined-up map's art is a frame on the canvas with its layers above it: Atlas.lua, or OpenMap's, which says
+  -- how high its art reaches)
   if ns.atlas and ns.atlas.top() > top then top = ns.atlas.top() end
+  local api = _G.OpenMapAPI
+  local art = api and api.ArtTopLevel and api.ArtTopLevel()
+  if type(art) == "number" and art > top then top = art end
   return math.min(top, 9000)
 end
--- where things go: 0..1 of the map underneath. With the joined-up map showing, everything in view counts, the parts
--- in its neighbours too (Atlas.lua: the map underneath is only the zone in the middle); else what's on the map itself.
+R.above = above   -- (the smoke test)
+-- OpenMap's joined-up world map (the addon OpenMap, through its OpenMapAPI) while it's showing on a zone or a map
+-- inside one: its API, else nil. Zoomed out to a continent or the world, everything stays on the map underneath, as
+-- without it
+local function openMap(mapID)
+  local api = _G.OpenMapAPI
+  if not (api and api.IsStitched and api.CanvasFromWorldPos and api.IsStitched()) then return nil end
+  local info = C_Map.GetMapInfo and C_Map.GetMapInfo(mapID)
+  if not (info and info.mapType and info.mapType >= 3) then return nil end
+  return api
+end
+-- the part of the map's canvas in the window, as 0..1 of the map underneath (x0, y0, x1, y1), widened by margin (a
+-- share of it); nil when the frames can't say
+local function canvasView(margin)
+  local sc = WorldMapFrame.ScrollContainer
+  local cv = canvas()
+  if not (sc and cv and sc.GetLeft and sc.GetEffectiveScale) then return nil end
+  local cl, ct, cw, ch = cv:GetLeft(), cv:GetTop(), cv:GetWidth(), cv:GetHeight()
+  local l, r, t, b = sc:GetLeft(), sc:GetRight(), sc:GetTop(), sc:GetBottom()
+  local es, ec = sc:GetEffectiveScale(), cv:GetEffectiveScale()
+  if not (cl and ct and cw and ch and l and r and t and b and es and ec and cw > 0 and ch > 0) then return nil end
+  local x0, x1 = (l * es - cl * ec) / (cw * ec), (r * es - cl * ec) / (cw * ec)
+  local y0, y1 = (ct * ec - t * es) / (ch * ec), (ct * ec - b * es) / (ch * ec)
+  local mx, my = (x1 - x0) * margin, (y1 - y0) * margin
+  return x0 - mx, y0 - my, x1 + mx, y1 + my
+end
+-- where things go: 0..1 of the map underneath. With a joined-up map showing (OpenMap's, or Atlas.lua's), everything in
+-- view counts, the parts in its neighbours too (the map underneath is only the zone in the middle); else what's on the
+-- map itself.
 -- at(m, x, y[, any]): a map spot (0..100), nil when out of view (any: anywhere); yards(c, X, Y): world yards;
 -- inView(x, y)
 local function placer(mapID)
   local P = {}
-  local x0, y0, x1, y1
-  if ns.atlas and ns.atlas.shown() then x0, y0, x1, y1 = ns.atlas.viewOnHost(0.1) end
+  local x0, y0, x1, y1, toHost
+  local api = openMap(mapID)
+  if api then
+    toHost = api.CanvasFromWorldPos
+    x0, y0, x1, y1 = canvasView(0.1)
+    if not x0 then x0, y0, x1, y1 = -math.huge, -math.huge, math.huge, math.huge end
+  elseif ns.atlas and ns.atlas.shown() then
+    toHost = ns.atlas.yardsToHost
+    x0, y0, x1, y1 = ns.atlas.viewOnHost(0.1)
+  end
   if x0 then
     P.wide = true
     function P.inView(x, y) return x and y and x >= x0 and x <= x1 and y >= y0 and y <= y1 or false end
-    function P.yards(c, X, Y) return ns.atlas.yardsToHost(c, X, Y) end
+    function P.yards(c, X, Y) if c and X and Y then return toHost(c, X, Y) end end
     function P.at(m, x, y, any)
       if not (ns.walk and m and x and y) then return nil end
       local c, X, Y = ns.walk.toWorld(m, x, y)
-      local fx, fy = ns.atlas.yardsToHost(c, X, Y)
+      if not (c and X and Y) then return nil end
+      local fx, fy = toHost(c, X, Y)
       if fx and (any or P.inView(fx, fy)) then return fx, fy end
     end
   else
@@ -854,7 +894,8 @@ function R.refresh()
 end
 
 -- a tick box in the world map's bottom left corner: the route's numbers and lines on that map, on or off, apart from
--- the Settings switch for both maps. Hidden while that switch has the route off on both maps.
+-- the Settings switch for both maps. Hidden while that switch has the route off on both maps. With OpenMap its button
+-- (36 high, 14 up) takes that corner: the box goes above it
 local routeBox
 local function showRouteBox()
   local wm = WorldMapFrame
@@ -864,7 +905,7 @@ local function showRouteBox()
   if not routeBox then
     routeBox = ns.newFrame("RouteMap", "CheckButton", "AuDHDWorldRouteBox", sc, "UICheckButtonTemplate")
     routeBox:SetSize(24, 24)
-    routeBox:SetPoint("BOTTOMLEFT", sc, "BOTTOMLEFT", 6, 6)
+    routeBox:SetPoint("BOTTOMLEFT", sc, "BOTTOMLEFT", 6, _G.OpenMapAPI and 56 or 6)
     routeBox:SetFrameLevel((sc:GetFrameLevel() or 1) + 20)
     routeBox.label = routeBox:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     routeBox.label:SetPoint("LEFT", routeBox, "RIGHT", 2, 1)
@@ -904,7 +945,20 @@ end
 R.showRouteBox = showRouteBox
 R.routeBox = function() return routeBox end   -- (the smoke test)
 
+-- redrawn as OpenMap's joined-up view moves (it says so a few times a second at most), not only every half second
+local toldOpenMap = false
+function R.hookOpenMap()
+  local api = _G.OpenMapAPI
+  if toldOpenMap or not (api and api.RegisterCallback) then return end
+  toldOpenMap = true
+  local function redraw()
+    if WorldMapFrame and WorldMapFrame:IsShown() then safe(R.drawWorld, "drawWorld"); safe(R.drawSpawnsWorld, "drawSpawnsWorld"); safe(R.drawRaresWorld, "drawRaresWorld"); safe(R.drawExtrasWorld, "drawExtrasWorld") end
+  end
+  api.RegisterCallback("AuDHD", "OpenMap_ViewChanged", redraw)
+  api.RegisterCallback("AuDHD", "OpenMap_StitchedChanged", redraw)
+end
 function R.enable()
+  safe(R.hookOpenMap, "hookOpenMap")
   if WorldMapFrame then
     WorldMapFrame:HookScript("OnShow", function() safe(showRouteBox, "routeBox") end)
     WorldMapFrame:HookScript("OnShow", function() safe(R.drawWorld, "drawWorld"); safe(R.drawSpawnsWorld, "drawSpawnsWorld"); safe(R.drawRaresWorld, "drawRaresWorld"); safe(R.drawExtrasWorld, "drawExtrasWorld") end)

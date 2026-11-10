@@ -51,7 +51,11 @@ local errs = {}
 local gradeOf = setmetatable({}, { __mode = "k" })    -- texture -> its colour match (the border's copies)
 local maskOf = setmetatable({}, { __mode = "k" })     -- a minimap picture's texture -> the land mask on it
 
-local function isOn() return AuDHDDB and AuDHDDB.atlas end
+-- the addon OpenMap joins the zones up itself, in the same window: with it loaded ours stays off (the setting is kept,
+-- for if it goes)
+local function openMap() return _G.OpenMapAPI ~= nil end
+local OPENMAP = "OpenMap is installed and joins the zones up already, so AuDHD's joined-up map stays off"
+local function isOn() return AuDHDDB and AuDHDDB.atlas and not openMap() end
 -- work in progress: never tried in game yet, so it says so on the map, when turned on and at its first error
 local WIP = "|cffff9933Work in progress:|r the joined-up map hasn't been tested in game yet and may show errors. /audhd atlas off turns it off."
 local warned = false
@@ -750,6 +754,7 @@ end
 -- the top of our art's frame levels (the route's lines and pins go above it: RouteMap.lua)
 function M.top() return root and artLevel and artLevel + RANGE or 0 end
 function M.isOn() return isOn() and true or false end
+function M.openMap() return openMap() end
 -- the view on a world point (0..1 across and down the world map) at a zoom (1: the whole world), and laid out again
 function M.show(u, v, zoom)
   if not active then return end
@@ -799,6 +804,7 @@ function M.viewOnHost(margin)
   report("view", a)
 end
 function M.set(on)
+  if on and openMap() then return OPENMAP end
   AuDHDDB.atlas = on or nil
   if on and not hooked then
     local ok, r = pcall(setup)
@@ -818,6 +824,7 @@ function M.command(arg)
     local r = M.set(arg == "on")
     return r or ("joined-up world map " .. (arg == "on" and ("on (open the world map: M). " .. WIP) or "off"))
   end
+  if openMap() then return OPENMAP end
   local e = M.errors()
   return "joined-up world map (work in progress, untested): " .. (isOn() and "on" or "off") .. (active and ", showing" or "") .. " (/audhd atlas on|off)"
     .. (#e > 0 and ("; problems: " .. table.concat(e, "; ")) or "")

@@ -273,8 +273,9 @@ end
 -- objectives of the quests in your log and your extra quests. Not done for real: a quest's item until the quest is
 -- handed in (a collect goal reads done as soon as the items are in your bags, which is just when they mustn't go), any
 -- other item until the route has passed its step. Worked out again every few seconds at most.
--- Each item: { n = how many to keep (nil: all of them, the count unknown), why = the quest it's for }; a quest counted
--- once, its guide goal and its quest log entry being the same need
+-- Each item: { n = how many to keep (nil: all of them), why = the quest it's for }; a quest counted once, its guide goal
+-- and its quest log entry being the same need. A quest in your log or on your extra list keeps all of its items: a
+-- spare may be for the next quest of its chain. A guide goal alone keeps the count it says
 local NEEDS_EVERY = 5
 local needs, needsAt = {}, nil
 local function questTitle(q)
@@ -291,14 +292,34 @@ local function addNeed(out, id, key, n, why)
   elseif had and n then e.by[key] = math.max(had, n)
   elseif not n then e.by[key] = false end
 end
-local function questItems(db, q, out)
-  local r = db and db.QuestRecord and db.F and db.QuestRecord(q)
-  local obj = r and r[db.F.OBJ]
-  for i = 1, #(obj or {}), 3 do
-    -- (2: an item objective, then its count)
-    if obj[i] == 2 and obj[i + 1] then addNeed(out, obj[i + 1], "q" .. q, tonumber(obj[i + 2]), questTitle(q)) end
+-- the quests each item is for, turned round: quest -> { item ids }. From ns.questItems, which is always there, for
+-- while the quest data isn't loaded
+local itemsOfQuest
+local function questItemsBuiltIn(q)
+  if not itemsOfQuest then
+    itemsOfQuest = {}
+    for id, qs in pairs(ns.questItems or {}) do
+      for _, qq in ipairs(qs) do
+        local l = itemsOfQuest[qq] or {}
+        itemsOfQuest[qq] = l
+        l[#l + 1] = id
+      end
+    end
   end
-  local v = r and r[db.F.ITEMS]
+  return itemsOfQuest[q]
+end
+local function questItems(db, q, out)
+  local r = db and db.IsLoaded and db.IsLoaded() and db.QuestRecord and db.F and db.QuestRecord(q)
+  if not r then
+    for _, id in ipairs(questItemsBuiltIn(q) or {}) do addNeed(out, id, "q" .. q, nil, questTitle(q)) end
+    return
+  end
+  local obj = r[db.F.OBJ]
+  for i = 1, #(obj or {}), 3 do
+    -- (2: an item objective)
+    if obj[i] == 2 and obj[i + 1] then addNeed(out, obj[i + 1], "q" .. q, nil, questTitle(q)) end
+  end
+  local v = r[db.F.ITEMS]
   if type(v) == "number" then addNeed(out, v, "i" .. q, nil, questTitle(q)) end
   if type(v) == "table" then for _, id in ipairs(v) do addNeed(out, id, "i" .. q, nil, questTitle(q)) end end
 end
@@ -311,6 +332,8 @@ local function routeItems()
   local out = {}
   local A = AuDHDEngine
   local E, db = A and A.Engine, A and A.QuestDB
+  -- (the quest data loads at login, but not in combat: loaded here then, out of combat, when a quest feature wants it)
+  if db and db.Load and db.IsLoaded and not db.IsLoaded() then pcall(db.Load) end
   local guide = E and E.GetGuide and E.GetGuide()
   local live = E and E.GetLiveStep and E.GetLiveStep() or math.huge   -- (nil: the guide is finished)
   for i, st in ipairs(guide and guide.steps or {}) do
@@ -370,7 +393,7 @@ local function amMage() return select(2, UnitClass("player")) == "MAGE" end
 -- mage's scrolls, not bound. Never your tools (Auction.lua's: fishing poles, Flint and Tinder, Simple Wood, Mining
 -- Pick and the like) or fishing lures. A list of { bag, slot, kind = "boe" | "mat" | "scroll", q = gear's quality, sub = Trade
 -- Goods subtype, split = how many of the stack (the rest kept) }. Then what's kept for the route: { { id, n, why } }.
--- What a quest needs stays: as many as it needs when the quest says (the rest of the stack goes), else all of them
+-- What a quest needs stays: all of them, or as many as a guide goal says when only the guide asks (the rest of the stack goes)
 function M.mailables()
   local out, kept, keptBy, left = {}, {}, {}, {}
   local function keep(id, n, why)

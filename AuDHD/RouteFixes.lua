@@ -79,6 +79,10 @@ ns.routeFixes = {
     { guide = "forever/alliance/30-40/02-desolace", t = "kill", q = 5561, note = "Use the {item:13892} on an Aged, Dying or Ancient Kodo, then lead it back to Smeed: one at a time" },
     -- Raene's Cleansing (1046) takes Dartol's Rod of Transformation, and gives it back as a reward
     { guide = "forever/alliance/30-40/03-ashenvale", t = "turnin", q = 1046, note = "Safe to hand in: you get the {item:5462} back as a reward and keep it" },
+    -- Jungle Secrets (215): Private Thorsen offers it only once saved from the two Kurzen's Agents (775, level 33) who
+    -- ambush him on his patrol, about a minute's walk south of the Rebel Camp. Dead, he's back at the camp in 10 minutes
+    -- and patrols again 20 minutes later (seen in game). Skipping it skips its five follow-ups, each needing the one before
+    { guide = "forever/alliance/30-40/04-stranglethorn-vale", t = "accept", q = 215, note = "{npc:738} only offers this after you save him from two Kurzen's Agents (level 33) who ambush him here on his patrol. If he isn't on the road, wait at the Rebel Camp (38, 3.5) and follow him when he sets off south: the ambush is about a minute down the road. If he dies, he's back at the camp in 10 minutes and sets off again 20 minutes later: about 30 minutes. Skipping it also skips the five quests after it (Bookie Herod to Report to Doren)" },
   },
   -- new goals, placed straight after the goal named by `after` (t, q) in that guide, or just before the one named by `before`
   add = {
