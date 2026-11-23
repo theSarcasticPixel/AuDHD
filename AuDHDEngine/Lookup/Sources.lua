@@ -5,10 +5,14 @@
 --   Lookup.Sources(kind, id[, direct]) -> list, entity
 --     direct: true = straight-line travel only, never the route planner (tooltips)
 --     kind: "item" | "mount" | "pet" | "recipe" | "tabard" (item IDs), "npc" | "rare",
---           "quest", "instance" (key), "object" | "treasure", "zone" (no rows)
+--           "quest", "instance" (key), "object" | "treasure", "zone" (its flight
+--           masters and inns, else its middle: types "flight", "inn", "middle")
 --     list[i] = { type, src, label, detail, zone, map, x, y, f, travel, effort, cost,
 --                 available, why, whyText, chance, price, standing, guideable }
 --   Lookup.IsMount(record) -> bool   -- a Codex item or spell record is a mount
+--   Lookup.QuestFor(quest) -> { classes, races } | nil   -- who a quest's masks
+--       are for (class and race files); nil: anyone of its side
+--   Lookup.QuestForText(quest) -> "Warlock only" | nil   -- the same in words
 --
 -- Ranking: available rows first (faction, race, class, level, professions,
 -- reputation), then cost = travel + effort in seconds. Travel is
@@ -37,7 +41,7 @@ ns.Lookup = Lookup
 
 local L = ns.L
 local type, pairs, ipairs, tostring, tonumber = type, pairs, ipairs, tostring, tonumber
-local floor = math.floor
+local floor, format = math.floor, string.format
 
 local ITEM_KINDS = { item = true, mount = true, pet = true, recipe = true, tabard = true }
 Lookup.ITEM_KINDS = ITEM_KINDS
@@ -131,6 +135,64 @@ local function maskBlocks(mask, bits, key)
 	local b = bits[key]
 	if not b then return false end
 	return not hasBit(mask, b)
+end
+
+-- Who a quest is for, by its masks -> { classes = { file, ... } | nil,
+-- races = { file, ... } | nil } | nil (anyone of its side).
+-- classes: the classes its class mask names, nil when it names all or none.
+-- races: the races its race mask names when they are not whole sides (the
+-- faction says those), with Skyborne when its side's bit is set (2^32 the
+-- Alliance's, 2^33 the Horde's). A mask without Skyborne's bit is a Classic
+-- side mask, not a Skyborne lock: a quest whose Era races are whole sides
+-- names none.
+local CLASS_ORDER = { "WARRIOR", "PALADIN", "HUNTER", "ROGUE", "PRIEST", "SHAMAN", "MAGE", "WARLOCK", "DRUID" }
+local SIDE_RACES = { { "Human", "Dwarf", "NightElf", "Gnome", sky = 2 ^ 32 }, { "Orc", "Scourge", "Tauren", "Troll", sky = 2 ^ 33 } }
+function Lookup.QuestFor(q)
+	if type(q) ~= "table" then return nil end
+	local classes, races
+	local cm = q.classes
+	if type(cm) == "number" and cm > 0 then
+		local list = {}
+		for _, c in ipairs(CLASS_ORDER) do
+			if hasBit(cm, CLASS_BIT[c]) then list[#list + 1] = c end
+		end
+		if #list > 0 and #list < #CLASS_ORDER then classes = list end
+	end
+	local rm = q.races
+	if type(rm) == "number" and rm > 0 then
+		local list, partial = {}, false
+		for _, side in ipairs(SIDE_RACES) do
+			local n = 0
+			for _, r in ipairs(side) do
+				if hasBit(rm, RACE_BIT[r]) then
+					n = n + 1
+					list[#list + 1] = r
+				end
+			end
+			if hasBit(rm, side.sky) then list[#list + 1] = "Skyborne" end
+			if n > 0 and n < #side then partial = true end
+		end
+		if partial then races = list end
+	end
+	if not (classes or races) then return nil end
+	return { classes = classes, races = races }
+end
+
+-- "Warlock only", "Human and Dwarf only", "Gnome Mage only": who a quest is
+-- for (Lookup.QuestFor) in the client's names, or nil.
+function Lookup.QuestForText(q)
+	local who = Lookup.QuestFor(q)
+	if not who then return nil end
+	local UI = ns.UI
+	local function names(list, one)
+		if not list then return nil end
+		local out = {}
+		for i, f in ipairs(list) do out[i] = (UI and one and UI[one](f)) or f end
+		if #out == 2 then return format(L["%s and %s"], out[1], out[2]) end
+		return table.concat(out, ", ")
+	end
+	local r, c = names(who.races, "RaceName"), names(who.classes, "ClassName")
+	return format(L["%s only"], (r and c) and (r .. " " .. c) or r or c)
 end
 
 ---------------------------------------------------------------------------
@@ -293,12 +355,32 @@ local function questSide(q)
 end
 Lookup.QuestSide = questSide
 
--- Quest availability for this character: why, text | nil
+-- The profession quest q asks for (the quest database's skill line: Badlands
+-- Reagent Run II is for alchemists, #2118) when the character has none of it:
+-- that skill line, else nil. Nil too while the database is not loaded or the
+-- client does not tell skills.
+local function missingProfession(q)
+	local Q, C = ns.QuestDB, ns.Compat
+	if not (Q and q.id and Q.IsLoaded() and C.Supports and C.Supports("skill")) then return nil end
+	local r = Q.QuestRecord(q.id)
+	local line = r and r[Q.F.SKILL]
+	if type(line) ~= "number" or line <= 0 then return nil end
+	return not C.GetSkillRank(line) and line or nil
+end
+
+-- Quest availability for this character: why, text | nil. A race or class
+-- lock says who it is for ("Warlock only", Lookup.QuestForText, #1730); a
+-- profession it has not learned, which one ("Requires Alchemy").
 local function questBlock(q, p)
 	local side = questSide(q)
 	if side and not sideOK(side, p) then return "faction", sideText(side) end
-	if maskBlocks(q.races, RACE_BIT, p.race) then return "race", L["Not for your race"] end
-	if maskBlocks(q.classes, CLASS_BIT, p.class) then return "class", L["Not for your class"] end
+	if maskBlocks(q.races, RACE_BIT, p.race) then return "race", Lookup.QuestForText(q) or L["Not for your race"] end
+	if maskBlocks(q.classes, CLASS_BIT, p.class) then return "class", Lookup.QuestForText(q) or L["Not for your class"] end
+	local line = missingProfession(q)
+	if line then
+		local name = Lookup.ProfessionName(line)
+		return "profession", L["Requires"] .. " " .. (name and L[name] or L["Profession"])
+	end
 	if q.minLevel and q.minLevel > p.level then return "level", levelText(q.minLevel) end
 	if ns.Compat.IsQuestCompleted(q.id) then return "done", L["Already done"] end
 	return nil
@@ -489,6 +571,33 @@ builders.craft = function(src, p, from, direct)
 		if best then
 			place(r, best, bestT)
 			r.trainer = bestNpc.id
+			r.trainerAt = best
+			r.detail = detail(L["Crafted"], r.zone)
+		end
+	end
+	-- A craft taught by a recipe item, not yet known (#2505: Recipe: Hot Wolf Ribs is
+	-- sold in Feralas and Desolace; no trainer teaches it): the row leads to the
+	-- recipe's own best source (Lookup.Sources of each recipe item that teaches
+	-- it), and its effort counts that source's; a recipe in the bags is only used.
+	-- The trainer stays for the rank.
+	if src.spell and not ns.Compat.IsSpellKnown(src.spell) and C.RecipeItems then
+		local recipes = C.RecipeItems(src.spell) or {}
+		local bestRow, bestId
+		for _, id in ipairs(recipes) do
+			if ns.Compat.GetItemCount(id) > 0 then
+				bestRow, bestId = nil, id
+				break
+			end
+			local row = Lookup.BestSource((Lookup.Sources("recipe", id, direct)))
+			if row and (not bestRow or (row.available and not bestRow.available)
+				or (row.available == bestRow.available and (row.cost or 0) < (bestRow.cost or 0))) then
+				bestRow, bestId = row, id
+			end
+		end
+		r.recipe, r.recipeRow = bestId, bestRow
+		if bestRow then
+			r.map, r.x, r.y, r.f, r.zone, r.travel = bestRow.map, bestRow.x, bestRow.y, bestRow.f, bestRow.zone, bestRow.travel
+			r.effort = r.effort + (bestRow.effort or 0)
 			r.detail = detail(L["Crafted"], r.zone)
 		end
 	end
@@ -623,15 +732,38 @@ local function purchaseGates(item, r)
 	end
 end
 
+-- An item many vendors sell (the Codex keeps every seller, #2719): the
+-- route's travel only to the ROUTED_VENDORS of the character's side nearest
+-- as the crow flies, the rest at that straight-line time, so a lookup of
+-- water sold in every town asks the route planner ten times, not two
+-- hundred. -> { [src] = true } | nil (all routed).
+local ROUTED_VENDORS = 10
+local function routedVendors(sources, p, from, direct)
+	if direct or not from then return nil end
+	local near = {}
+	for _, src in ipairs(sources) do
+		if src.type == "vendor" then
+			local npc, _, t = npcSpawn(src.npc, from, true)
+			if npc and t and sideOK(npc.faction, p) then near[#near + 1] = { src = src, t = t } end
+		end
+	end
+	if #near <= ROUTED_VENDORS then return nil end
+	table.sort(near, function(a, b) return a.t < b.t end)
+	local keep = {}
+	for i = 1, ROUTED_VENDORS do keep[near[i].src] = true end
+	return keep
+end
+
 local function itemSources(id, p, from, direct)
 	local C = Codex()
 	local item = C.Item(id)
 	if not item then return {}, nil end
 	local list = {}
+	local routed = routedVendors(item.sources or {}, p, from, direct)
 	for _, src in ipairs(item.sources or {}) do
 		local build = builders[src.type]
 		if build then
-			local r = build(src, p, from, direct)
+			local r = build(src, p, from, direct or (routed ~= nil and src.type == "vendor" and not routed[src]))
 			if r then list[#list + 1] = r end
 		end
 	end
@@ -639,6 +771,26 @@ local function itemSources(id, p, from, direct)
 	local spell = item.spell and C.Spell(item.spell)
 	local class = spell and spell.class
 	for _, r in ipairs(list) do
+		if (r.type == "drop" or r.type == "object") and r.src.requiresQuests and (ns.Compat.GetItemCount(id, true) or 0) == 0 then
+			local steps, why, q = Lookup.DropQuestSteps(r.src, p, from, direct)
+			if not steps then
+				block(r, why, L["Requires"] .. " " .. (q and q.title or L["Quest"]))
+				r.guideable = false
+			elseif #steps > 0 then
+				local here = from
+				local required
+				for _, step in ipairs(steps) do
+					local goal = step.goals[1]
+					if #step.goals > 1 or not ns.Compat.IsOnQuest(goal.quest) then
+						required = step.title
+						r.effort = r.effort + QUEST_BASE
+						if located(goal) then r.effort = r.effort + (travel(here, goal, direct) or 0) end
+						here = step.goals[#step.goals] or here
+					end
+				end
+				if required then r.detail = detail(r.detail, L["Requires"] .. " " .. required) end
+			end
+		end
 		if class and p.class and class ~= p.class then
 			r.available, r.why, r.whyText = false, "class", L["Class mount"]
 		elseif item.reqLevel and item.reqLevel > p.level then
@@ -662,7 +814,19 @@ local function spawnRows(entity, kind, p, from, levelGate, direct)
 		place(r, s, travel(from, s, direct))
 		r.detail = r.zone
 		if entity.level then r.detail = detail(r.zone or "", L["Level"] .. " " .. entity.level) end
-		if levelGate and entity.level and entity.level - p.level > MOB_LEVEL_GAP then
+		-- Only creatures you fight are out of reach by level: an NPC friendly to the
+		-- character's side (innkeeper, vendor, trainer, quest giver) is open at any level,
+		-- and so is a factionless one with a service role (the goblin towns' bankers and
+		-- trainers have no faction in Forever's data).
+		local friendly
+		if entity.faction then
+			friendly = sideOK(entity.faction, p)
+		else
+			for _, role in ipairs(entity.roles or {}) do
+				if role ~= "rare" then friendly = true break end
+			end
+		end
+		if levelGate and not friendly and entity.level and entity.level - p.level > MOB_LEVEL_GAP then
 			block(r, "level", L["Level"] .. " " .. entity.level)
 		end
 		if entity.faction and not sideOK(entity.faction, p) then r.hostile = true end
@@ -699,6 +863,51 @@ local function questRows(q, p, from, direct)
 		r.effort = r.effort + QUEST_BASE
 		r.guideable = giver ~= nil or (q.start and q.start.item and #q.start.item > 0) or false
 		list[#list + 1] = r
+	end
+	return list
+end
+
+-- A zone's places a guide takes you to (#1743): its flight masters (a
+-- class's own, the Druids' Nighthaven, only for that class) and its inns,
+-- from Nav's travel data, the other side's listed but not open; with none
+-- open to the character (the other side's towns), also the middle of the
+-- zone (Nav.ZoneMiddle: the walking data's zones, cities and open zones). A
+-- continent or a battleground has none of them: no rows.
+local TAXI_SIDE = { "A", "H", "AH" }
+local function zoneRows(zone, p, from, direct)
+	local list = {}
+	local N = ns.Nav
+	local data = N and N.GetTravelData and N.GetTravelData()
+	if not data then return list end
+	local T = N.travel
+	local function add(kind, label, what, pt, side)
+		local r = newRow(nil, kind)
+		r.label = label
+		place(r, pt, travel(from, pt, direct))
+		r.detail = detail(what, r.zone)
+		if side and not sideOK(side, p) then block(r, "faction", sideText(side)) end
+		r.guideable = located(r)
+		list[#list + 1] = r
+	end
+	for _, node in ipairs(data.taxi or {}) do
+		if node.map == zone.id and (not node.class or node.class == p.class) then
+			add("flight", (T and T.TaxiName and T.TaxiName(node, true)) or node.name, L["Flight master"], node, TAXI_SIDE[node.faction])
+		end
+	end
+	local C = Codex()
+	for _, inn in ipairs(data.inns or {}) do
+		if inn.map == zone.id then
+			local keeper = inn.npc and C.Npc(inn.npc)
+			add("inn", (T and T.PlaceName and T.PlaceName(inn)) or inn.name, L["Innkeeper"], inn, keeper and keeper.faction)
+		end
+	end
+	local open = false
+	for _, r in ipairs(list) do open = open or r.available end
+	if not open and N.ZoneMiddle then
+		local c, wx, wy = N.ZoneMiddle(zone.id)
+		local x, y
+		if c then x, y = ns.Compat.WorldToMap(c, wx, wy, zone.id) end
+		if x then add("middle", zone.name, L["Zone"], { map = zone.id, x = x, y = y }) end
 	end
 	return list
 end
@@ -742,6 +951,7 @@ function Lookup.Sources(kind, id, direct)
 		end
 	elseif kind == "zone" then
 		entity = C.Zone(id)
+		if entity then list = zoneRows(entity, p, from, direct) end
 	end
 	rank(list)
 	cache[key] = { at = now(), level = p.level, list = list, entity = entity }
@@ -829,6 +1039,8 @@ end
 
 if ns.RegisterEvent then
 	ns.RegisterEvent("QUEST_TURNED_IN", Lookup.ResetSources)
+	ns.RegisterEvent("QUEST_ACCEPTED", Lookup.ResetSources)
+	ns.RegisterEvent("QUEST_REMOVED", Lookup.ResetSources)
 	ns.RegisterEvent("SKILL_LINES_CHANGED", Lookup.ResetSources)
 	ns.RegisterEvent("ZONE_CHANGED_NEW_AREA", Lookup.ResetSources)
 end

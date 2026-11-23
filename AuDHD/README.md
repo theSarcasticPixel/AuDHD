@@ -27,7 +27,9 @@ Every part can be turned on or off, so you only get the parts that help you.
   you know. Click to put it on. The oil button shows how many uses are left.
 - **Self buffs.** Lightning Shield, Demon Skin, Inner Fire, aspects and the like: a button when one drops off.
 - **Well Fed.** Not Well Fed, with food in your bags that does it? A button appears. Click to eat it, or pick another food from the list under it. Settings > Reminders: the food you prefer comes first.
-- **Buff scrolls.** A scroll in your bags (Stamina, Agility and the like) whose buff isn't on you? A button to read it, with the scrolls for your other missing buffs under it. Quiet while the class buff it won't stack with is on.
+- **Buff scrolls and elixirs.** A scroll or elixir in your bags (Stamina, Agility and the like) whose buff isn't on you? A button to use it, with the ones for your other missing buffs under it. Quiet while the class buff it won't stack with is on. Untick any you keep to sell (Settings, Reminders).
+- **Battle Shout in fights.** Warriors get a Battle Shout button in fights, with the alert, whenever Battle Shout isn't on you; it's gone while it is. Drag it where you want it while Settings is open.
+- **Copy guild texts.** In the Guild & Communities window, click the Message of the Day or the Guild Information to get it in a box you can copy from (Ctrl+C), with any link in it, like a Discord invite, on its own line. `/audhd motd` opens it too.
 - **Quest items.** When a step needs you to use an item (a rod, a potion, a totem), a button for it appears next to
   the route window.
 
@@ -51,16 +53,18 @@ Hold **Shift** while talking to an NPC to pause all of these.
   `/audhd spec <name>` sets which spec rewards are scored for. A Mining, Herbalism or Skinning book is always left for
   you to choose.
 - **Sells grey items and repairs** at vendors.
-- **Hunters: buys ammo** to keep you stocked, leaving enough gold for your next training.
+- **Hunters: buys ammo** to keep you stocked, leaving enough gold for your next training. When that leaves you short,
+  a popup says how much it kept back and why, with a button to buy anyway.
 - **Sell and train nudges.** Bags nearly full near a vendor, new skills to learn near your class trainer, or a
   profession near the cap of its rank with its trainer close by? A reminder pops up once per visit, for Alliance and
   Horde. Hunters near an ammo vendor get one when running low, and in a group whenever the quiver isn't full. **Go to** points the arrow there; **Snooze** quiets it for 10, 20 or
   30 minutes.
 - **Alt mail.** In the settings (Alt mail tab), name your bank character, first and last name, or pick an alt for
   each kind of item: herbs to your alchemist, ore to your blacksmith, green BoE gear to your enchanter, the rest to a
-  catch-all. Each character has its own alt mail settings and starts with them off. Near a mailbox with gear you wouldn't wear or trade goods the route doesn't need, a reminder pops up (your tools,
+  catch-all (left empty, your bank character gets it). Each character has its own alt mail settings and starts with them off. Near a mailbox with gear you wouldn't wear or trade goods the route doesn't need, a reminder pops up (your tools,
   fishing poles and lures stay with you), and
-  the mail window gets a **Send all** button: it asks once, then sends them alt by alt, 12 items a mail. Mail only goes
+  the mail window gets a **Send all** button: it asks once, then sends them alt by alt, 12 items a mail. An opened mail with items or money gets a **Forward** button: pick an alt and it
+  takes them out and mails them on. Mail only goes
   to characters that have logged in with AuDHD on your account, so a typo doesn't send your herbs to a stranger. For
   an alt on another account, tick **Other account**. The game can't tell an addon when you delete a character, so
   **Your characters...** lists them with when each was last played: remove ones you've deleted, so a new player who
@@ -74,7 +78,8 @@ Hold **Shift** while talking to an NPC to pause all of these.
   The **Alts** button on top of your backpack opens another character's bags, bank or mail as if they were yours, or
   **Show all** of them side by side (also `/audhd bags`). The **Bank** button beside it opens your own bank, as it was
   when you last closed it, anywhere. **Shift-B** opens your bags and bank together, and again closes them (Shift-B is only
-  taken over when it opens bags or does nothing).
+  taken over when it opens bags or does nothing). Settings > User Interface picks Shift-click on the backpack instead, or
+  turns it off.
 - **Reagent bag.** B opens it with your backpack, when B opens your bags (Settings > User Interface).
 - **Auction house.** A window beside the auction house:
   - **Sell** lists what is in your bags that can go up (not what the route still needs, or gear you would wear). Pick
@@ -89,10 +94,41 @@ Hold **Shift** while talking to an NPC to pause all of these.
     patterns. Never a detour. All of it can be switched off in Settings, Auction house.
   - The Sell list shows what a vendor pays (V) and what disenchanting gives (DE) next to each price, and marks the
     items a vendor pays about as much for. Hold **Shift** on an item tooltip for its price history.
-  - A grey frame marks the stack in your bags that loses you least if you need room.
+  - A red frame marks the stack in your bags that loses you least if you need room (never a Waylaid Crate). A gold
+    frame marks items your route wants for its quests, a blue one items for quests in your log the route doesn't do,
+    and a grey one quest items none of your quests wants, in the bank window too.
+    Each slot's tooltip says which. Switched in Settings, User Interface.
   - Crate tooltips price each bundle. Alt-click a crate to add a bundle to your shopping banker's list.
   - At a profession trainer, a recipe's tooltip shows what the item it makes fetches at a vendor, at auction and
-    disenchanted, what its reagents cost at auction, and the return, so you can pick which recipes pay.
+    disenchanted, what its reagents cost (at auction, or from a vendor when cheaper), and the return, so you can pick
+    which recipes pay.
+  - In your profession window, the item a recipe makes shows what its materials cost (at auction, or from a vendor
+    when cheaper) and the profit at auction (A) and at a vendor (V) (Shift for each material), and the recipe list
+    shows them after each name. Vendor prices are the lowest each character has been charged (reputation lowers them),
+    learned when you open a vendor's window, else the usual price. A pattern's tooltip (or plans, formula, schematic,
+    recipe), at the auction house or anywhere, shows the same for what it teaches.
+  - In the Enchanting window, **Enchant levelling** (left of Enchant): when an enchant would replace the one on your
+    item, the question opens with its Yes over the Enchant button, so a double click there levels you on one practice
+    item. The game only lets you say Yes yourself. Only while that window is open, never in the trade window, and off
+    again when you log out.
+  - On a recipe's page in your profession window, type how many to make and click **Add to shopping**: the
+    materials go on the auction helper's Crafting list, and **Buy** offers only what you don't already carry.
+    Materials cheaper from a vendor are left off, and chat names them. Switched in Settings, User Interface.
+    The list shows what they cost when you added them. **Price all** looks up every item you still need and
+    gives the total, then the button buys them in turn: the game wants a click for each purchase, so it's
+    one click for an item's price and one to confirm, with the next item's price asked straight after.
+  - Auctionator shopping lists import too: the list menu's **Import (Auctionator)...**, then paste the string (an
+    Auctionator export, or a guide site's import string). Each list comes in under its own name with its counts,
+    replacing a list of that name; items cheaper from a vendor are left off, and chat names them.
+  - **Gathering checklist.** The list menu's **Track gathering** turns a list into a checklist in its own small
+    window, beside the guide while you level or roam: each item with how many you carry of how many you want, ticked
+    off as your bags fill, and where it comes from (herb or ore and the skill it needs, the mobs that drop it, a
+    vendor, fishing). The herb and ore nodes you still need show on your world map and minimap, grey where your skill
+    is too low; **Arrow: nearest node** points the arrow at the closest one until you switch it back. `/audhd gather
+    [<list>|show|hide|stop]`.
+  - **All herb and ore nodes.** Settings' **All herb nodes** and **All ore nodes** show every node of that sort on
+    your world map and minimap, list or not. Every herb you pick and every node you mine is remembered for all your
+    characters and shows there too, so nodes missing from the addon's data fill in as you play.
 - **Quest complete message.** When a quest's objectives are all done, it says so in your chat, and (if you like) to your party when
   you're in one.
 
@@ -125,6 +161,9 @@ Hold **Shift** while talking to an NPC to pause all of these.
   pointing back. `/audhd where` says the same whenever you ask, and you get it when you log back in.
 - **Extra quests.** Want a quest the guide doesn't have? `/audhd extra add <name>`, or take it and say yes to the pop-up.
   It goes where it adds the least time, not before you're the level for it, and you're told about what it costs.
+  In the game's quest log a **+** on a quest the route doesn't do fits it in, and a **-** on one you added takes it
+  off your route. Beside the log, a list of every quest you added, picked up or not. Both switched in Settings, User
+  Interface.
 - **Timed quests** are never picked up on the way somewhere. With one in your log, finishing and handing it in comes
   before everything else.
 - **Missing data.** If we don't know where something is, the addon says so and asks you to log the quest, then gives
@@ -154,15 +193,22 @@ off by default (Settings > Dungeons), where you can also choose which dungeons t
   enough). Long trips use flights
   you know, and the Deeprun Tram between Ironforge and Stormwind when that's quicker.
 - **Map pins.** The route's next steps are numbered on your world map and minimap. The **Route** tick box in the world map's bottom-left corner hides the numbers and lines on the world map only.
+- **Who's who on OpenMap.** With the OpenMap addon's joined-up world map, people get a coloured ring: blue your party,
+  orange your raid, green guild members who share where they are. Switched in Settings, User Interface.
+- **Other addons' routes.** An addon that sends its route to Shortest Path Forever (Books on map's book route, for one)
+  sends it to AuDHD when Shortest Path Forever isn't installed: drawn on your world map and minimap in purple, under
+  the guide's route, walking and flying by the flight paths you know. A bar above that addon's window (or near the top of
+  the screen) shows the way being worked out, then "route ready". Your arrow stays on the guide.
 - **Your own waypoint.** `/way 42 54` (or `/way <zone> 42 54`) points the arrow anywhere.
 
 ## In combat
 
 - **Range guide** on the enemy's nameplate: too close, in range, too far. Useful for hunters and casters.
 - **Threat** on nameplates, so you can see what's about to turn on you.
+- **Combo points** under your target's nameplate, for rogues and druids in Cat Form.
 - **Rare alerts.** A pop-up and a `/tar` button (with the rare's face) near any rare's spawn point, louder when a quest
   of yours needs it.
-  Choose all rares, only the route's rares, or none. Optionally, the mouse wheel cycles through nearby rares.
+  Choose all rares, only the route's rares, or none. Optionally, the mouse wheel cycles through nearby rares, and your action bar keys target the rare before their spell.
 - **Drop chances on mob tooltips.** Hover a mob to see what quest items it drops, the known (or estimated) chance, and
   how lucky you've been so far: `Dewy Lasher Frond 25% · you 2/9 (22%)`.
 
@@ -177,7 +223,7 @@ Show it, lock it, and pick its parts in the settings (Windows).
 ## Fishing
 
 - **One-click fishing.** With a fishing pole in your hands, one click of a mouse button you choose (right, middle,
-  button 4 or 5) casts, and the same click reels in when the bobber splashes. Holding the button still turns the camera
+  button 4 or 5), or the space bar, casts, and the same click reels in when the bobber splashes. Holding the button still turns the camera
   as usual.
 - **Lures for you.** No lure on your pole? The click puts the best one from your bags on first.
 - **Fishing food first.** Food or drink that gives +fishing in your bags and its buff not on you: the click has it
@@ -233,6 +279,7 @@ the detailed map.
 | `/audhd arrow` | Arrow options (show, hide, lock, unlock, scale) |
 | `/audhd map on\|off` | Route pins on the world map and minimap |
 | `/audhd threat on\|off` | Threat on nameplates |
+| `/audhd combo on\|off` | Combo points on the target's nameplate |
 | `/audhd rares all\|route\|off` | Which rares to alert for |
 | `/audhd auto` | Automation switches (accept, complete, junk, repair on or off; reward value or manual) |
 | `/audhd ammo [off\|<count>]` | Hunter ammo restocking |
@@ -240,13 +287,15 @@ the detailed map.
 | `/audhd imbue [off\|on]` | Weapon imbue and oil buttons |
 | `/audhd buffs [off\|on]` | Self-buff buttons |
 | `/audhd food [off\|on]` | The Well Fed button |
-| `/audhd scrolls [off\|on]` | The buff scroll button |
+| `/audhd scrolls [off\|on]` | The buff scroll and elixir button |
+| `/audhd shout [off\|on]` | The Battle Shout button (warriors) |
+| `/audhd motd` | Your guild's message of the day (or information) in a box to copy |
 | `/audhd askbuffs [off\|on]` | Ask-the-party buff buttons |
 | `/audhd announce [off\|on]` | Quest complete messages |
 | `/audhd announce party off\|on` | Whether they also go to party chat |
 | `/audhd heal [on\|off\|setup]` | Click-cast healing frames, or pick their spells |
 | `/audhd shards [on\|off\|max <n>\|low <n>\|lock\|unlock\|reset]` | Soul shard counter |
-| `/audhd fish [on\|off\|right\|middle\|4\|5]` | One-click fishing, and which mouse button |
+| `/audhd fish [on\|off\|right\|middle\|4\|5\|space]` | One-click fishing, and which button |
 | `/audhd fish loud on\|off` · `volume <10-100>` | The louder splash, and its volume |
 | `/audhd fish lure on\|off` · `zone on\|off` · `map on\|off` | Lures, the zone's fishing level under the minimap, on the world map |
 | `/audhd fish go` · `gear on\|off` · `food on\|off` · `button on\|off` | Go fishing (or stop), fishing gear with the pole, fishing food, the Go fishing button |

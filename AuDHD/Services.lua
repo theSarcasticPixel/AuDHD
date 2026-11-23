@@ -85,6 +85,7 @@ end
 -- until set. AuDHDDB.mailChars["Name-Realm"]
 local cfgKey   -- (worked out once: the character doesn't change in a session)
 local spare = { mailOff = true }   -- (before the game says who you are)
+local stamped
 function M.cfg()
   AuDHDDB.mailChars = AuDHDDB.mailChars or {}
   if not cfgKey then
@@ -94,8 +95,41 @@ function M.cfg()
   end
   local key = cfgKey
   local c = AuDHDDB.mailChars[key]
-  if not c then c = { mailOff = true } AuDHDDB.mailChars[key] = c end
+  if not c then c = M.copyNames(key) AuDHDDB.mailChars[key] = c end
+  if not stamped and M.hasNames(c) then c.at, stamped = time(), true end   -- (once a session: the last played)
   return c
+end
+-- whether a character's settings name any alt
+function M.hasNames(c)
+  if type(c) ~= "table" then return false end
+  if M.cleanName(c.bankAlt) then return true end
+  for _, r in pairs(c.altMail and c.altMail.rows or {}) do if M.cleanName(r.name) then return true end end
+  return false
+end
+-- A character with no settings yet starts with the names from your others (the reminders stay off until switched on):
+-- the same name on another realm (a renamed realm), else the last played on this realm, else any, else the settings
+-- from before they were each character's own
+function M.copyNames(key)
+  local name, realm = key:match("^(.-)%-(.*)$")
+  local best, bestRank, bestAt
+  for k, c in pairs(AuDHDDB.mailChars) do
+    if k ~= key and M.hasNames(c) then
+      local n, r = k:match("^(.-)%-(.*)$")
+      local rank = (n == name and 3) or (r == realm and 2) or 1
+      local at = c.at or 0
+      if not best or rank > bestRank or (rank == bestRank and at > bestAt) then best, bestRank, bestAt = c, rank, at end
+    end
+  end
+  best = best or { bankAlt = AuDHDDB.bankAlt, altMail = AuDHDDB.altMail }
+  local out = { mailOff = true, bankAlt = M.cleanName(best.bankAlt), bankAltOther = best.bankAltOther }
+  local am = type(best.altMail) == "table" and best.altMail
+  if am then
+    out.altMail = { mode = am.mode, rows = {} }
+    for k, r in pairs(am.rows or {}) do
+      if type(r) == "table" and M.cleanName(r.name) then out.altMail.rows[k] = { name = M.cleanName(r.name), other = r.other } end
+    end
+  end
+  return out
 end
 -- Forever's characters are "Name Surname", and the real game's mail needs both. The offline server finds a character by
 -- the first name alone, so a one-word name still works there.
@@ -202,7 +236,8 @@ end
 
 -- ------------------------------------------------------------------ who gets what
 -- Basic: everything to the bank alt. Professions: each kind of item to its own alt, by the game's item type, and the
--- rest to the catch-all; a row left empty goes to the catch-all, an empty catch-all keeps them in your bags. Trade
+-- rest to the catch-all; a row left empty goes to the catch-all, an empty catch-all to the bank alt (Basic's name), and
+-- with none set they stay in your bags. Trade
 -- Goods subtypes: 1 Parts, 2 Explosives, 3 Devices, 5 Cloth, 6 Leather, 7 Metal & Stone, 8 Meat, 9 Herb, 10 Elemental,
 -- 12 Enchanting (Classic's numbers; not yet seen in Forever's client).
 M.GROUPS = {
@@ -216,7 +251,7 @@ M.GROUPS = {
   { key = "greens", label = "Green BoE gear", prof = "Enchanting, to disenchant" },
   { key = "elemental", label = "Elemental", prof = "several professions", sub = { [10] = true } },
   { key = "scrolls", label = "Mage scrolls", prof = "your mage (the Comprehension scrolls)" },
-  { key = "catch", label = "Everything else", prof = "the catch-all: what no row above takes, and rows left empty" },
+  { key = "catch", label = "Everything else", prof = "the catch-all: what no row above takes, and rows left empty. Left empty itself: your bank alt" },
 }
 local ORDER = {}
 for i, g in ipairs(M.GROUPS) do ORDER[g.key] = i end
@@ -234,17 +269,22 @@ function M.row(key)
   c.altMail.rows[key] = c.altMail.rows[key] or {}
   return c.altMail.rows[key]
 end
--- an item's alt: its name, whether it's on another account, and the row it came from
+-- an item's alt: its name, whether it's on another account, the row it came from, and whether it fell through to the
+-- bank alt (Professions with its row and the catch-all empty)
 local function recipient(it)
   if not M.profMode() then return cleanName(M.cfg().bankAlt), M.cfg().bankAltOther, "bank alt" end
   local key = groupOf(it)
   local r = M.row(key)
   if not cleanName(r.name) then key, r = "catch", M.row("catch") end
+  if not cleanName(r.name) and cleanName(M.cfg().bankAlt) then
+    return cleanName(M.cfg().bankAlt), M.cfg().bankAltOther, "catch", true
+  end
   return cleanName(r.name), r.other, key
 end
 -- any alt set up at all
 function M.configured()
-  if not M.profMode() then return cleanName(M.cfg().bankAlt) ~= nil end
+  if cleanName(M.cfg().bankAlt) then return true end
+  if not M.profMode() then return false end
   for _, g in ipairs(M.GROUPS) do if cleanName(M.row(g.key).name) then return true end end
   return false
 end
@@ -253,12 +293,13 @@ function M.plan()
   local by, sends, held, heldBy, count = {}, {}, {}, {}, 0
   local list, kept = M.mailables()
   for _, it in ipairs(list) do
-    local to, other, key = recipient(it)
+    local to, other, key, toBank = recipient(it)
     local why = to and M.whyNot(to, other)
     if to and not why then
       local k = to:lower()
-      if not by[k] then by[k] = { to = to, items = {}, order = ORDER[key] or 0 } sends[#sends + 1] = by[k] end
+      if not by[k] then by[k] = { to = to, items = {}, order = ORDER[key] or 0, toBank = 0 } sends[#sends + 1] = by[k] end
       table.insert(by[k].items, it)
+      if toBank then by[k].toBank = by[k].toBank + 1 end
       count = count + 1
     elseif to and why ~= "that's you" then
       local k = to:lower()
@@ -278,6 +319,7 @@ end
 -- spare may be for the next quest of its chain. A guide goal alone keeps the count it says
 local NEEDS_EVERY = 5
 local needs, needsAt = {}, nil
+local routeQuests = {}   -- the quests the guide you're on takes (any step's goal) and your extra quests
 local function questTitle(q)
   local t = q and C_QuestLog.GetTitleForQuestID and C_QuestLog.GetTitleForQuestID(q)
   local db = AuDHDEngine and AuDHDEngine.QuestDB
@@ -336,9 +378,11 @@ local function routeItems()
   if db and db.Load and db.IsLoaded and not db.IsLoaded() then pcall(db.Load) end
   local guide = E and E.GetGuide and E.GetGuide()
   local live = E and E.GetLiveStep and E.GetLiveStep() or math.huge   -- (nil: the guide is finished)
+  local quests = {}
   for i, st in ipairs(guide and guide.steps or {}) do
     local items
     for g, goal in ipairs(st.goals or {}) do
+      if type(goal.quest) == "number" then quests[goal.quest] = true end
       if (goal.t == "collect" or goal.t == "buy") and goal.item then items = items or {} items[g] = goal end
     end
     local v = items and E.GetStepView(i)
@@ -361,16 +405,27 @@ local function routeItems()
     local info = C_QuestLog.GetInfo(li)
     if info and not info.isHeader and info.questID then questItems(db, info.questID, out) end
   end
-  for q in pairs(ns.extra and ns.extra.list and ns.extra.list() or {}) do questItems(db, q, out) end
+  for q in pairs(ns.extra and ns.extra.list and ns.extra.list() or {}) do questItems(db, q, out) quests[q] = true end
   for _, e in pairs(out) do
     local n = 0
     for _, c in pairs(e.by) do if c == false then n = nil break end n = n + c end
     e.n = n
   end
-  needs = out
+  needs, routeQuests = out, quests
   return out
 end
 local function routeNeeds(id) return id and routeItems()[id] or false end
+-- an item for your quests: "route" when a step of the guide you're on or a quest it takes (or an extra quest) wants
+-- it, "other" when only a quest in your log the route doesn't do; nil when none wants it
+function M.questItemFor(id)
+  local e = routeNeeds(id)
+  if not e then return nil end
+  for key in pairs(e.by) do
+    local q = tonumber(key:match("^[qi](%d+)$"))
+    if key:sub(1, 1) == "s" or (q and routeQuests[q]) then return "route" end
+  end
+  return "other"
+end
 M.routeItems = routeItems   -- (the smoke test)
 M.routeNeeds = routeNeeds   -- (the auction house: not offered for sale)
 -- a mage's Comprehension scroll: its tooltip says "Requires Comprehension". By the tooltip, not a list, so new ones
@@ -394,11 +449,15 @@ local function amMage() return select(2, UnitClass("player")) == "MAGE" end
 -- Pick and the like) or fishing lures. A list of { bag, slot, kind = "boe" | "mat" | "scroll", q = gear's quality, sub = Trade
 -- Goods subtype, split = how many of the stack (the rest kept) }. Then what's kept for the route: { { id, n, why } }.
 -- What a quest needs stays: all of them, or as many as a guide goal says when only the guide asks (the rest of the stack goes)
+-- Gear kept as an upgrade for you is said too ({ id, n, upgrade = true }). An item given Send anyway in the send window
+-- (M.sendAnyway) goes whatever it's kept for, until you leave the mailbox
+local anyway = {}   -- item id -> true, this mailbox visit
+function M.sendAnyway(id) if id then anyway[id] = true end end
 function M.mailables()
   local out, kept, keptBy, left = {}, {}, {}, {}
-  local function keep(id, n, why)
+  local function keep(id, n, why, upgrade)
     local k = keptBy[id]
-    if not k then k = { id = id, n = 0, why = why } keptBy[id] = k kept[#kept + 1] = k end
+    if not k then k = { id = id, n = 0, why = why, upgrade = upgrade } keptBy[id] = k kept[#kept + 1] = k end
     k.n = k.n + n
   end
   for _, bag in ipairs(ns.bagIDs()) do
@@ -411,13 +470,16 @@ function M.mailables()
         if (ns.auction and ns.auction.isTool and ns.auction.isTool(id0, classID, subID))
             or (ns.fishing and ns.fishing.isLure and ns.fishing.isLure(id0)) then
           -- yours to use: stays in your bags
-        elseif (classID == 2 or classID == 4) and equipLoc and equipLoc ~= "" and (info.quality or 0) >= 2
-            and not (ns.auto and ns.auto.keepForMe and ns.auto.keepForMe(link)) then
-          out[#out + 1] = { bag = bag, slot = slot, kind = "boe", q = info.quality }
+        elseif (classID == 2 or classID == 4) and equipLoc and equipLoc ~= "" and (info.quality or 0) >= 2 then
+          if not anyway[id0] and ns.auto and ns.auto.keepForMe and ns.auto.keepForMe(link) then
+            keep(id0, 1, nil, true)
+          else
+            out[#out + 1] = { bag = bag, slot = slot, kind = "boe", q = info.quality }
+          end
         elseif classID == 7 or (classID ~= 2 and classID ~= 4 and not amMage() and isScroll(info.itemID or itemID)) then
           local id, stack = info.itemID or itemID, info.stackCount or 1
           local it = { bag = bag, slot = slot, kind = classID == 7 and "mat" or "scroll", sub = subID }
-          local need = M.routeNeeds(id)
+          local need = not anyway[id] and M.routeNeeds(id)
           if not need then
             out[#out + 1] = it
           elseif not need.n then
@@ -916,41 +978,119 @@ function M.mailEvent(event, a1, a2)
   end
 end
 
-StaticPopupDialogs.AUDHD_MAIL_ALL = {
-  text = "%s", button1 = "Send", button2 = CANCEL or "Cancel",
-  OnAccept = function() pcall(M.sendAll) end,
-  timeout = 0, whileDead = 1, hideOnEscape = 1,
-}
 -- what's held back and why: names not seen on this account, and what your quests need ("4 Light Leather kept for Kodo
 -- Hide Bag")
 local function heldText(p)
   local out = {}
   for _, h in ipairs(p.held) do out[#out + 1] = ("%d item%s kept: %s"):format(h.n, h.n == 1 and "" or "s", h.why) end
   local name = C_Item and C_Item.GetItemNameByID
-  for _, k in ipairs(p.kept or {}) do
-    out[#out + 1] = ("%d %s kept for %s"):format(k.n, (name and name(k.id)) or ("item " .. k.id), k.why)
-  end
+  for _, k in ipairs(p.kept or {}) do out[#out + 1] = M.keptLine(k) end
   return table.concat(out, "\n")
+end
+function M.keptLine(k)
+  local name = C_Item and C_Item.GetItemNameByID
+  local item = (name and name(k.id)) or ("item " .. k.id)
+  if k.upgrade then return ("%s kept: an upgrade for you"):format(item) end
+  return ("%d %s kept for %s"):format(k.n, item, k.why)
 end
 M.heldText = heldText   -- (the smoke test)
 function M.stoppedWhy() return stopped end
-function M.askText()
+-- the send window's text: the mails, the postage, and what's held back from an alt (the items kept are rows under it)
+function M.askText(noKept)
   local p = M.plan()
-  if p.count == 0 then return nil end
+  if p.count == 0 then
+    if noKept or #p.kept == 0 then return #p.kept > 0 and "Nothing to send: everything here is kept back." or nil end
+    return nil
+  end
   local lines, mails = {}, 0
   for _, s in ipairs(p.sends) do
     local m = math.ceil(#s.items / maxItems())
     mails = mails + m
     lines[#lines + 1] = ("%d item%s to %s"):format(#s.items, #s.items == 1 and "" or "s", s.to)
+    -- (Professions: what no row and no Everything else takes goes to the bank alt, said so)
+    if (s.toBank or 0) > 0 then
+      lines[#lines] = lines[#lines] .. (" (%d with no row: your bank alt)"):format(s.toBank)
+    end
   end
-  local held = heldText(p)
+  local held = heldText(noKept and { held = p.held } or p)
   return ("Send %d mail%s?\n%s\nPostage: %s%s"):format(mails, mails == 1 and "" or "s", table.concat(lines, "\n"),
     money(p.count * POSTAGE), held ~= "" and ("\n\n" .. held) or "")
 end
-local function askSendAll()
-  local text = M.askText()
-  if text then StaticPopup_Show("AUDHD_MAIL_ALL", text) end
+-- asked before sending: the mails, then each item kept back (for a quest, or an upgrade for you) with a Send anyway
+-- button that sends it this mailbox visit. Send sends them all (or fills the mail, when the game won't let an addon send)
+local ask
+local ASK_W, ROW_H = 380, 24
+local function askButton(parent, label, w)
+  local b = ns.newFrame("Services", "Button", nil, parent, "UIPanelButtonTemplate")
+  b:SetSize(w, 22)
+  b:SetText(label)
+  return b
 end
+local function askFill()
+  local p = M.plan()
+  ask.text:SetText(M.askText(true) or "")
+  local h = 20 + (ask.text:GetStringHeight() or 14)
+  for i, k in ipairs(p.kept) do
+    local r = ask.rows[i]
+    if not r then
+      r = ns.newFrame("Services", "Frame", nil, ask)
+      r:SetSize(ASK_W - 40, ROW_H)
+      r.text = r:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+      r.text:SetPoint("LEFT", 0, 0)
+      r.text:SetWidth(ASK_W - 160)
+      r.text:SetJustifyH("LEFT")
+      r.go = askButton(r, "Send anyway", 110)
+      r.go:SetPoint("RIGHT", 0, 0)
+      ask.rows[i] = r
+    end
+    r:ClearAllPoints()
+    r:SetPoint("TOPLEFT", ask, "TOPLEFT", 20, -(h + 4))
+    r.text:SetText(M.keptLine(k))
+    r.go:SetScript("OnClick", function()
+      M.sendAnyway(k.id)
+      log("BANKALT_ANYWAY", { id = k.id, upgrade = k.upgrade or nil })
+      askFill()
+      if mailShown then pcall(mailShown) end
+    end)
+    r:Show()
+    h = h + ROW_H
+  end
+  for i = #p.kept + 1, #ask.rows do ask.rows[i]:Hide() end
+  ask.send:SetEnabled(p.count > 0)
+  ask:SetHeight(h + 56)
+end
+local function askSendAll()
+  if not ask then
+    ask = ns.newFrame("Services", "Frame", "AuDHDMailAsk", UIParent, "BackdropTemplate")
+    ask:SetWidth(ASK_W)
+    ask:SetPoint("CENTER", UIParent, "CENTER", 0, 120)
+    ask:SetFrameStrata("DIALOG")
+    ask:SetClampedToScreen(true)
+    ask:EnableMouse(true)
+    if ask.SetBackdrop then
+      ask:SetBackdrop({ bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background", edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border",
+        tile = true, tileSize = 32, edgeSize = 32, insets = { left = 11, right = 12, top = 12, bottom = 11 } })
+    end
+    ask.text = ask:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    ask.text:SetPoint("TOP", 0, -20)
+    ask.text:SetWidth(ASK_W - 40)
+    ask.rows = {}
+    ask.send = askButton(ask, "Send", 120)
+    ask.send:SetPoint("BOTTOM", ask, "BOTTOM", -64, 18)
+    ask.send:SetScript("OnClick", function()
+      ask:Hide()
+      if M.cfg().mailManual then pcall(M.fillMail) else pcall(M.sendAll) end
+    end)
+    ask.cancel = askButton(ask, CANCEL or "Cancel", 120)
+    ask.cancel:SetPoint("BOTTOM", ask, "BOTTOM", 64, 18)
+    ask.cancel:SetScript("OnClick", function() ask:Hide() end)
+    if UISpecialFrames then table.insert(UISpecialFrames, "AuDHDMailAsk") end
+  end
+  askFill()
+  ask:Show()
+end
+M.askFrame = function() return ask end   -- (the smoke test)
+M.ask = askSendAll                       -- (the smoke test)
 
 mailShown = function()
   if M.cfg().mailOff or not M.configured() or not MailFrame then return end
@@ -959,12 +1099,14 @@ mailShown = function()
     mailButton:SetHeight(22)
     mailButton:SetPoint("TOPRIGHT", MailFrame, "BOTTOMRIGHT", 0, -2)
     mailButton:SetScript("OnClick", function()
-      if M.cfg().mailManual then pcall(M.fillMail) else pcall(askSendAll) end
+      if M.cfg().mailManual and #M.plan().kept == 0 then pcall(M.fillMail) else pcall(askSendAll) end
     end)
   end
   local p = M.plan()
   local first = p.sends[1]
-  if M.cfg().mailManual then
+  if p.count == 0 then
+    mailButton:SetText(("Kept back (%d)"):format(#p.kept))
+  elseif M.cfg().mailManual then
     mailButton:SetText(first and ("Fill mail to %s (%d)"):format(first.to, #first.items) or "")
   elseif #p.sends == 1 then
     mailButton:SetText(("Send all to %s (%d)"):format(first.to, p.count))
@@ -972,7 +1114,7 @@ mailShown = function()
     mailButton:SetText(("Send all to %d alts (%d)"):format(#p.sends, p.count))
   end
   -- a run that stopped early: why, in red under the button, and the button sends the rest
-  if stopped and p.count > 0 and not M.cfg().mailManual then mailButton:SetText(("Send the rest (%d)"):format(p.count)) end
+  if stopped and p.count > 0 and not M.cfg().mailManual and first then mailButton:SetText(("Send the rest (%d)"):format(p.count)) end
   if not mailButton.why then
     mailButton.why = mailButton:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     mailButton.why:SetPoint("TOPRIGHT", mailButton, "BOTTOMRIGHT", 0, -2)
@@ -980,7 +1122,7 @@ mailShown = function()
   end
   mailButton.why:SetText(stopped and ("Stopped: " .. stopped) or "")
   mailButton:SetWidth(math.max(170, (mailButton:GetTextWidth() or 0) + 28))
-  mailButton:SetShown(p.count > 0 and not run)
+  mailButton:SetShown((p.count > 0 or #p.kept > 0) and not run)
   -- kept back: said once a mailbox visit (again only when it changes)
   local held = heldText(p)
   if held ~= "" and not run and held ~= told then say((held:gsub("\n", ". "))) end
@@ -1052,7 +1194,8 @@ for _, e in ipairs({ "MAIL_SEND_SUCCESS", "MAIL_FAILED", "MAIL_CLOSED", "ADDON_A
   pcall(frame.RegisterEvent, frame, e)
 end
 frame:SetScript("OnEvent", function(_, event, ...)
-  if event == "MAIL_SHOW" then stopped, told = nil, nil pcall(mailShown) return end
+  if event == "MAIL_SHOW" then stopped, told, anyway = nil, nil, {} pcall(mailShown) return end
+  if event == "MAIL_CLOSED" and ask then ask:Hide() end
   if event == "TRAINER_SHOW" then C_Timer.After(0.5, function() pcall(M.trainerSeen) end) return end
   if event ~= "PLAYER_LOGIN" then pcall(M.mailEvent, event, ...) return end
   -- again a little later: the surname may come late

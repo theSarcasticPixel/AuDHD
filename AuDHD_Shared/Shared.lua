@@ -1,0 +1,1 @@
+-- Holds only the saved file (AuDHDSharedDB). AuDHD and Distractible read and write it: see AuDHD/AccountData.lua.

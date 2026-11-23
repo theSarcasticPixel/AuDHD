@@ -20,7 +20,8 @@
 --   Dungeons.Attune(key, id) -> guideId | nil, reason    -- builds, registers and opens it
 --
 -- Guide: one stop per quest still to do (Lookup.QuestStep, with the open
--- prerequisites Lookup.QuestChain finds that the list lacks), after the
+-- prerequisites Lookup.QuestChain finds that the list lacks, each saying under
+-- its accept the quests of the list it is needed for: Dungeons.MarkOpens), after the
 -- steps it waits on, each whole: its accept, objectives and turn-in, also
 -- when the giver, a target or the turn-in is inside an instance (the Codex's
 -- NPC instance, else the attunement's cited `inside`): sent to that
@@ -241,8 +242,11 @@ local function itemPoint(s, inside)
 	return nil
 end
 
+-- A goal at point p; a talk goal at an NPC also gets the height of its spawn
+-- there (Lookup.SpawnZ: the arrow walks to its floor, #1024).
 local function at(goal, p)
 	if located(p) then goal.map, goal.x, goal.y, goal.f = p.map, p.x, p.y, p.f == "e" and "e" or nil end
+	if goal.map and goal.npc then goal.z = LK().SpawnZ("npc", goal.npc, goal) end
 	return goal
 end
 
@@ -263,7 +267,8 @@ local function itemStep(s, inside)
 end
 
 -- The quest stops: every quest step still to do (and the open prerequisites
--- QuestChain adds), each after the quest steps it waits on.
+-- QuestChain adds, each with `opens`: the steps' quests it comes before),
+-- each after the quest steps it waits on.
 local function questStops(a, st, p, from, inside)
 	local Lk, C = LK(), ns.Codex
 	local stops, byId = {}, {}
@@ -288,7 +293,13 @@ local function questStops(a, st, p, from, inside)
 					if not byId[r.id] then
 						local listed = false
 						for _, o in ipairs(st.steps) do listed = listed or (o.step.kind == "quest" and o.step.id == r.id) end
-						if not listed then deps[#deps + 1] = add(r, { deps[#deps] }) end
+						if not listed then
+							deps[#deps + 1] = add(r, { deps[#deps] })
+							stops[deps[#deps]].opens = { rec }
+						end
+					elseif stops[byId[r.id]].opens then
+						local opens = stops[byId[r.id]].opens
+						if opens[#opens] ~= rec then opens[#opens + 1] = rec end
 					end
 				end
 				for _, pid in ipairs(s.after or {}) do
@@ -348,7 +359,10 @@ function Dungeons.AttuneGuide(key, id)
 	for _, si in ipairs(order) do
 		local stop = stops[si]
 		extras((stop.index or 1) - 1)
-		steps[#steps + 1] = Lk.QuestStep(stop.rec, stop.inP or from, { inside = inside })
+		local step = Lk.QuestStep(stop.rec, stop.inP or from, { inside = inside })
+		-- A quest the list lacks says which of its quests it opens (Dungeons.MarkOpens).
+		if stop.opens then Dungeons.MarkOpens(step, stop.rec.id, stop.opens, false) end
+		steps[#steps + 1] = step
 	end
 	extras(#st.steps)
 	if #steps == 0 then return nil, "nothing" end
@@ -357,7 +371,7 @@ function Dungeons.AttuneGuide(key, id)
 	if a.note then last.goals[#last.goals + 1] = { t = "note", text = L[a.note] } end
 	local e = d and d.entrance
 	if located(e) then
-		last.goals[#last.goals + 1] = { t = "goto", text = L["Enter"] .. " " .. d.name, map = e.map, x = e.x, y = e.y, f = e.f == "e" and "e" or nil }
+		last.goals[#last.goals + 1] = { t = "goto", text = d.name, map = e.map, x = e.x, y = e.y, f = e.f == "e" and "e" or nil, entrance = true }
 	end
 	if #last.goals > 0 then steps[#steps + 1] = last end
 	return { title = format(L["%s: %s"], d and d.name or key, a.name), steps = steps, dungeon = key }

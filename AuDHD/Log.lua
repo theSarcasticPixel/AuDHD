@@ -95,7 +95,18 @@ function ns.bagIDs()
   if r and r > last then out[#out + 1] = r end
   return out
 end
+-- Forever's bank window is container 6 (48 slots, seen in game), and its -1 reports 32 slots the window never shows.
+-- Forever has no NUM_BANKBAGSLOTS and no bank numbers in Enum.BagIndex: that tells it apart
+local function foreverBank() return NUM_BANKBAGSLOTS == nil and not bagIndex("BankBag_1") end
+-- the bank's own slots (not its bags)
+function ns.bankMain() return foreverBank() and 6 or (BANK_CONTAINER or -1) end
 function ns.bankBagIDs()
+  -- Forever: the bank, then its 8 bag slots (the first is 7, seen in game; the rest taken to follow it)
+  if foreverBank() then
+    local out = { 6 }
+    for b = 7, 14 do out[#out + 1] = b end
+    return out
+  end
   local out = { BANK_CONTAINER or -1 }
   local first = bagIndex("BankBag_1") or ((NUM_BAG_SLOTS or 4) + 1)
   for i = 0, (NUM_BANKBAGSLOTS or 6) - 1 do out[#out + 1] = first + i end

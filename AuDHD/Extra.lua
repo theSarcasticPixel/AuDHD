@@ -115,7 +115,8 @@ end
 X.replan = replan
 -- A stop the guide has reached that's out of the way waits: going there, then on to the guide's next place, against
 -- going straight on, timed by the router with flights, boats and the hearth. It comes up once that's DETOUR_MAX seconds
--- or less, when you pass within reach, or at the guide's last step so it's never lost. Not a game fact: our own
+-- or less, when you pass within reach, or at the last step of a guide with no levelling guide after it so it's never
+-- lost (with one after it, it waits for that guide, placed among its steps as usual). Not a game fact: our own
 -- judgement (about 3 min). Looked at again every DETOUR_LOOK seconds at most; nil when the router can't tell (it comes
 -- up as before)
 local DETOUR_MAX, DETOUR_LOOK = 180, 10
@@ -153,6 +154,19 @@ local function reached(q, stop, cur, last)
   return false
 end
 X.reached = reached   -- (the smoke test)
+-- a levelling guide follows this one (its next, or one of its choices, that's there and for you)
+local function hasNext(g)
+  local _, _, A = engine()
+  local G = A and A.Guides
+  if not (G and G.Get) then return false end
+  local me = A.Compat and A.Compat.GetPlayerInfo and A.Compat.GetPlayerInfo() or nil
+  for _, n in ipairs(g.nextChoices or { g.next }) do
+    local t = G.Get(n)
+    if t and (not me or not G.GuideMatches or G.GuideMatches(t, me)) and (not t.category or t.category == "Leveling") then return true end
+  end
+  return false
+end
+X.hasNext = hasNext   -- (the smoke test)
 -- the stop due now, as a step: the guide has reached its place, or you're passing it
 function X.due()
   local E = engine()
@@ -178,7 +192,8 @@ function X.due()
       if waiting and d then
         if d > 2 * PASSING then h.away = true elseif h.away and d <= PASSING then waiting, h["until"] = false, nil end
       end
-      if not waiting and ((d and d <= PASSING) or reached(q, stop, cur, g and g.steps and cur >= #g.steps)) then return step end
+      local last = g and g.steps and cur >= #g.steps and not hasNext(g)
+      if not waiting and ((d and d <= PASSING) or reached(q, stop, cur, last)) then return step end
     end
   end
 end
@@ -233,6 +248,7 @@ function X.add(q)
   local p = plans[q]
   if ns.log then ns.log.add("EXTRA_ADD", { q = q }) end
   if ns.core then ns.core.advance("extra") end
+  if ns.questMarks then pcall(ns.questMarks.refresh) end
   if not p then return rec.title .. " added" end
   local parts = { ("%s added: about %d min more"):format(p.title, math.ceil(p.seconds / 60)) }
   if p.xp then parts[#parts + 1] = ("for about %d XP"):format(p.xp) end
@@ -245,6 +261,7 @@ end
 function X.remove(q)
   list()[q], held()[q] = nil, nil
   replan()
+  if ns.questMarks then pcall(ns.questMarks.refresh) end
   return "removed"
 end
 function X.command(rest)

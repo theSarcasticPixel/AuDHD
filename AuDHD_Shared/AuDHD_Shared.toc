@@ -1,0 +1,8 @@
+## Interface: 16001
+## Title: AuDHD Shared
+## Notes: What your characters know (auction prices, money, bags), shared by AuDHD and Distractible on every character of the account
+## Author: theSarcasticPixel
+## Version: 1.0.0
+## SavedVariables: AuDHDSharedDB
+
+Shared.lua

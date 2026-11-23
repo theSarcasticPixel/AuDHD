@@ -2,8 +2,9 @@
 ## Title: AuDHD
 ## Notes: Remembers the small stuff: buff and ammo reminders, easy group buffs and healing, and what to do next. /audhd settings
 ## Author: theSarcasticPixel
-## Version: 1.4.2
+## Version: 1.5.0
 ## Dependencies: AuDHDEngine
+## OptionalDeps: AuDHD_Shared
 ## SavedVariables: AuDHDDB, AuDHDLog
 
 WalkData.lua
@@ -14,17 +15,21 @@ ServiceData.lua
 ProfTrainerData.lua
 DropData.lua
 QuestItemData.lua
+QuestNeedData.lua
 RareData.lua
 SpawnData.lua
 RareDrops.lua
 Log.lua
+AccountData.lua
 Share.lua
+GuildCopy.lua
 Auto.lua
 Core.lua
 Party.lua
 QuestDone.lua
 Chronicle.lua
 UI.lua
+QuestTarget.lua
 QuestFacts.lua
 RouteFixes.lua
 RouteFix.lua
@@ -32,6 +37,7 @@ Guide.lua
 Dungeons.lua
 Track.lua
 Extra.lua
+QuestLogMarks.lua
 Route.lua
 Settings.lua
 MinimapButton.lua
@@ -39,16 +45,25 @@ Arrow.lua
 Way.lua
 Range.lua
 Threat.lua
+Combo.lua
 Rare.lua
 RouteMap.lua
+SideRoute.lua
 Ammo.lua
 Train.lua
 Services.lua
+MailForward.lua
 ClassQuest.lua
 Stats.lua
 AltItems.lua
 AuctionData.lua
+VendorPriceData.lua
+RecipeItemData.lua
 Auction.lua
+CraftValue.lua
+EnchantMode.lua
+GatherData.lua
+Gather.lua
 TrainerValue.lua
 Imbue.lua
 BuffAsk.lua

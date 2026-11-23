@@ -231,6 +231,7 @@ local function State(map)
 			decoded = 0,
 			cl = {}, -- [k] = the decoded cluster's strings (decodeGrid), false when the cluster has no data
 			area = {}, -- [k] = the cluster's area field string (maps format 3; nodeArea reads it), kept while it is decoded
+			areaMarks = {}, -- [k] = checkpoints into area[k] (areaMarks), dropped with it
 			graphUsed = {},
 			graphSize = {},
 			nodes = {}, -- [k] = entrance ids (k * 4096 + i); each one's cell, layer and component are read from the graph
@@ -920,7 +921,7 @@ local useClock, decodedKB, decodedCount = 0, 0, 0
 local function evict(st, oldest)
 	decodedKB, decodedCount = decodedKB - st.sizes[oldest], decodedCount - 1
 	st.sizes[oldest], st.used[oldest] = nil, nil
-	st.cl[oldest], st.area[oldest] = nil, nil
+	st.cl[oldest], st.area[oldest], st.areaMarks[oldest] = nil, nil, nil
 	st.decoded = st.decoded - 1
 end
 
@@ -959,7 +960,7 @@ local function grid(st, k)
 		local area = unpackField(st.D, "area", k + 1)
 		local size = (c.bytes + (area and #area or 0)) / 1024
 		trim(st, size)
-		st.cl[k], st.area[k] = c, area or false
+		st.cl[k], st.area[k], st.areaMarks[k] = c, area or false, nil
 		st.sizes[k], st.decoded, decodedKB = size, st.decoded + 1, decodedKB + size
 		decodedCount = decodedCount + 1
 		if st.D.packed then
@@ -1010,9 +1011,55 @@ local function keepRead(st, k)
 	end
 	reader.wantSt, reader.wantK = st, k
 end
+
+-- Checkpoints into a cluster's area field string (nodeArea), so reading a node's area scans from the last checkpoint
+-- before it instead of from the string's start: a city cluster's floor nodes lie tens of thousands of nodes in, and
+-- from the start one read cost up to 40 ms in the Undercity, every quarter second while the player walked indoors
+-- (Walk.lua's floor reads, Path.SurfacesAt with areas). Every AREA_MARK nodes: where the next run starts in the
+-- string, the last node before it and that node's value. Built in one pass over the string: under the job's frame
+-- budget by Path.Prefetch (the reader's cluster, slicing), else at the first read. Kept only while the cluster's
+-- string is (dropped on eviction or a new decode), and only for the string it was built from.
+local AREA_MARK = 256
+local function areaMarks(st, k, s)
+	local m = st.areaMarks[k]
+	if m and m.s == s then
+		return m
+	end
+	local mi, mn, mv, count = {}, {}, {}, 0
+	local i, n, value, last, len = 1, -1, 0, -huge, #s
+	while i <= len do
+		if n - last >= AREA_MARK then
+			count, last = count + 1, n
+			mi[count], mn[count], mv[count] = i, n, value
+			slice()
+		end
+		local a = B64[byte(s, i)]
+		if a < 48 then
+			value, n, i = (a * 64 + B64[byte(s, i + 1)]) * 64 + B64[byte(s, i + 2)], n + 1, i + 3
+		else
+			n, i = n + a - 47, i + 1
+		end
+	end
+	m = { s = s, i = mi, n = mn, v = mv, count = count }
+	-- A slice may have yielded: the cluster's string may be gone or replaced meanwhile.
+	if st.area[k] == s then
+		st.areaMarks[k] = m
+	end
+	return m
+end
+
 -- Path.Prefetch's job: decode cluster k of st (slicing under the job's deadline); the reader's if still read last.
+-- Its area checkpoints are built here too, under the same budget, so the floor reads that follow stay cheap.
 local function prefetch(st, k)
 	if grid(st, k) and reader.wantSt == st and reader.wantK == k then
+		local s = st.area[k]
+		if s then
+			areaMarks(st, k, s)
+			-- Building them may have sliced: still decoded, and still the cluster read last?
+			if not (st.cl[k] and reader.wantSt == st and reader.wantK == k) then
+				return
+			end
+		end
 		keepRead(st, k)
 	end
 end
@@ -1369,14 +1416,29 @@ end
 
 -- The area field (maps format 3; tools/lib/nav/pack.js HEADER): node's WMOAreaTable row id in decoded cluster k (the
 -- client's subzone on that floor), read straight from its string (kept with the cluster's grid: the reader asks a few
--- nodes now and then, so nothing more is decoded); 0 in none, or on a map or cluster without the field.
+-- nodes now and then, so nothing more is decoded), from the last checkpoint before node (areaMarks); 0 in none, or on
+-- a map or cluster without the field.
 local function nodeArea(st, k, node)
 	local s = st.area[k]
 	if not s then
 		return 0
 	end
+	local m = areaMarks(st, k, s)
+	local mn, lo, hi = m.n, 1, m.count
+	while lo < hi do
+		local mid = floor((lo + hi + 1) / 2)
+		if mn[mid] < node then
+			lo = mid
+		else
+			hi = mid - 1
+		end
+	end
 	local i, n, value = 1, -1, 0
-	while i <= #s do
+	if lo >= 1 and mn[lo] and mn[lo] < node then
+		i, n, value = m.i[lo], mn[lo], m.v[lo]
+	end
+	local len = #s
+	while i <= len do
 		local a = B64[byte(s, i)]
 		if a < 48 then
 			value, n, i = (a * 64 + B64[byte(s, i + 1)]) * 64 + B64[byte(s, i + 2)], n + 1, i + 3
@@ -1460,6 +1522,120 @@ local function sight(st, P, a, b, water, limit, profile, hb, hostileOK, style, d
 	return k == P.k[b] and node == P.n[b]
 end
 
+-- Path.Sight's clusters: the ones its line has read and their use stamps before (reused, at most SIGHT_CLUSTERS).
+local SIGHT_CLUSTERS = 4
+local sightK, sightU, sightN = {}, {}, 0
+-- May Path.Sight read cluster k of st? true once it is decoded (its stamp kept to be put back); false for a cluster
+-- without data; nil while it is not decoded (Sight decodes nothing) or the line has read SIGHT_CLUSTERS already.
+local function sightCluster(st, k)
+	for i = 1, sightN do
+		if sightK[i] == k then
+			return true
+		end
+	end
+	local c = st.cl[k]
+	if c == nil or sightN >= SIGHT_CLUSTERS then
+		return nil
+	end
+	if not c then
+		return false
+	end
+	sightN = sightN + 1
+	sightK[sightN], sightU[sightN] = k, st.used[k]
+	return true
+end
+
+local INDOOR_CLASS, CITY_CLASS = Costs.CLASS.INDOOR, Costs.CLASS.CITY
+
+-- Polestar's arrow beside its path (Nav/Follow.lua `sight`): can a player standing at the world point (x1, y1) at
+-- height z1 on map walk straight to (x2, y2)? Walks every cell the segment between the two cells crosses, following
+-- the surface from the node under the start (the one nearest z1, within ZTOL), as the drawn line's straightening does
+-- (sight): never through a closed step (a wall, a cliff edge, a building's side), from one floor to another or into
+-- water, and on a map with classes never onto indoor or indoor city ground nor into a town hostile to profile ("Horde",
+-- "Alliance"; nil: none is). True when it reaches the end cell on a surface within ZTOL of z2 (any, z2 nil); false
+-- when blocked or the start stands on no surface within ZTOL of z1. Reads decoded clusters only, as Path.SurfacesAt:
+-- nil when the line (or a diagonal step's corner) touches one that is not, touches more than SIGHT_CLUSTERS, or
+-- leaves the map's data. It decodes nothing, puts back every use stamp it moved (the cache's order and the
+-- reader's slot stay as they were), never yields and allocates nothing.
+---@param map number
+---@param x1 number
+---@param y1 number
+---@param z1 number
+---@param x2 number
+---@param y2 number
+---@param z2? number
+---@param profile? string
+---@return boolean?
+function Path.Sight(map, x1, y1, z1, x2, y2, z2, profile)
+	local st = states[map]
+	if not (st and x1 and y1 and z1 and x2 and y2) then
+		return nil
+	end
+	local cs, C, ny, GX, GY = st.cs, st.C, st.ny, st.GX, st.GY
+	local gx, gy = floor((x1 - st.x0) / cs), floor((y1 - st.y0) / cs)
+	local tx, ty = floor((x2 - st.x0) / cs), floor((y2 - st.y0) / cs)
+	if gx < 0 or gy < 0 or gx >= GX or gy >= GY or tx < 0 or ty < 0 or tx >= GX or ty >= GY then
+		return nil
+	end
+	sightN = 0
+	local clock0 = useClock
+	local k = floor(gx / C) * ny + floor(gy / C)
+	local clear = sightCluster(st, k)
+	local node
+	if clear then
+		local gap
+		node, gap = surface(st, k, (gx % C) * C + gy % C, -1, z1, st.cl[k])
+		clear = node ~= nil and gap <= ZTOL
+	end
+	local hb = profile == "Horde" and Costs.HUB_ALLIANCE or profile == "Alliance" and Costs.HUB_HORDE or nil
+	local classed = st.classed
+	local dx, dy = tx - gx, ty - gy
+	local sx, sy = dx > 0 and 1 or -1, dy > 0 and 1 or -1
+	local nx, nyy = dx * sx, dy * sy
+	local x, y, ix, iy = gx, gy, 0, 0
+	while clear and (ix < nx or iy < nyy) do
+		local d = (1 + 2 * ix) * nyy - (1 + 2 * iy) * nx
+		local mx, my = 0, 0
+		if d == 0 then
+			mx, my = sx, sy
+		elseif d < 0 then
+			mx = sx
+		else
+			my = sy
+		end
+		-- The step's cells: its target, and a diagonal's two corners (stepOpen and diagonalOpen read them).
+		clear = sightCluster(st, floor((x + mx) / C) * ny + floor((y + my) / C))
+		if clear and mx ~= 0 and my ~= 0 then
+			clear = sightCluster(st, floor((x + mx) / C) * ny + floor(y / C))
+			if clear then
+				clear = sightCluster(st, floor(x / C) * ny + floor((y + my) / C))
+			end
+		end
+		if clear then
+			k, node = neighbour(st, k, node, x, y, mx, my, false)
+			if not k then
+				clear = false
+			elseif classed then
+				local cb = CLS[byte(st.cl[k].kind, node + 1)]
+				local base = cb % 8
+				if base == INDOOR_CLASS or base == CITY_CLASS or (hb and cb % (hb + hb) >= hb) then
+					clear = false
+				end
+			end
+		end
+		x, y = x + mx, y + my
+		ix, iy = ix + mx * sx, iy + my * sy
+	end
+	if clear and z2 then
+		clear = abs(zOf(st.cl[k], node) - z2) <= ZTOL
+	end
+	for i = 1, sightN do
+		st.used[sightK[i]] = sightU[i]
+	end
+	useClock = clock0
+	return clear
+end
+
 -- Collapse a node path to its turns, then pull the string: from each anchor, jump to the furthest point in sight.
 -- Water may only be crossed where the path itself swam. On a map with classes a straight segment replaces the path
 -- between two entries only over ground no costlier for profile in style (times the zone danger of danger, Path.lua's
@@ -1533,14 +1709,25 @@ local function smooth(st, P, profile, style, danger)
 end
 
 -- With no search queued (PathJobs.lua's rest): drop the strings of clusters whose decode never finished and trim the
--- decoded graph to its resting ceiling. Decoded grids, the decoder's scratch and the endpoint trees stay for the next
--- search (within Path.cacheKB, ENDTREES), until Idle.
+-- decoded graph to its resting ceiling. Decoded grids and the decoder's scratch stay for the next search (within
+-- Path.cacheKB), until Idle; of the endpoint trees, the newest Path.restTrees (a walk asked again from where the last
+-- one started or ended reads them), the older ones' costs staying in st.ends. While a search runs st.endTrees keeps
+-- up to Path.lua's ENDTREES; at rest, each tree a city's cluster can make 2-3 MB.
+Path.restTrees = 2
 local function Rest()
 	for _, st in pairs(states) do
 		if st.D.packed then
 			st.D.grid, st.D.height, st.D.floor = {}, {}, {}
 			if st.classed then
 				st.D.class = {}
+			end
+		end
+		local kept = st.endTrees
+		if kept and #kept > Path.restTrees then
+			for _ = 1, #kept - Path.restTrees do
+				local gone = table.remove(kept, 1)
+				st.endNodes = (st.endNodes or 0) - (gone.size or 0)
+				gone.tree = nil
 			end
 		end
 	end
@@ -1633,6 +1820,34 @@ ns.PathGrid = {
 	cellOf = cellOf,
 	chunkOf = chunkOf,
 	zoneAt = zoneAt,
+	-- Every chunk's zone of cluster k in one pass over its zone field (zoneAt reads one chunk a pass): a string of 512
+	-- bytes, chunk q (0-based, chunkOf's numbering) the uiMapID in bytes 2q + 1 (high) and 2q + 2 (low), 0 for none;
+	-- nil without the field. (A field, not a local: Path.ZoneTile is its only reader.)
+	zoneString = function(st, k)
+		local s = st.D.zone and st.D.zone[k + 1]
+		if not s then
+			return nil
+		end
+		local out, n, q, i, pair = {}, 0, 0, 1, "\0\0"
+		while i <= #s and q < 256 do
+			local a, reps = B64[byte(s, i)], 1
+			if a < 48 then
+				local value = a * 64 + B64[byte(s, i + 1)]
+				pair, i = string.char(floor(value / 256), value % 256), i + 2
+			else
+				reps, i = a - 47, i + 1
+			end
+			if q + reps > 256 then
+				reps = 256 - q
+			end
+			n, q = n + 1, q + reps
+			out[n] = string.rep(pair, reps)
+		end
+		if q < 256 then
+			out[n + 1] = string.rep("\0\0", 256 - q)
+		end
+		return table.concat(out)
+	end,
 	nodeArea = nodeArea,
 	chunkDanger = chunkDanger,
 	nodesOf = nodesOf,
@@ -1645,6 +1860,7 @@ ns.PathGrid = {
 	standing = standing,
 	snap = snap,
 	smooth = smooth,
+	unpackField = unpackField,
 	Rest = Rest,
 	Idle = Idle,
 	Reset = Reset,

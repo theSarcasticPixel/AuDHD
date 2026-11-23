@@ -13,15 +13,22 @@
 --     client hides it).
 --   Data.CheckInstall() -> missing, stale, retired
 --     The release zip's folders beside Polestar: names of the required ones
---     (Polestar_Guides, Polestar_Codex) that are not installed, and "name
---     (version)" for any of them whose TOC version differs from Polestar's.
+--     (Polestar_Guides, Polestar_Codex, the player's faction part) that are
+--     not installed, and "name version" for every Polestar_* folder in the
+--     AddOns list, loaded or not, whose TOC version differs from Polestar's
+--     (Polestar_Recorder, released on its own, left out; a folder or a
+--     Polestar without a version is unknown, never a mismatch).
 --     retired: the locale codes whose old folders, Polestar_Guides_<locale>
 --     or Polestar_Names_<locale> (before 0.3.0; the language folder
 --     Polestar_<locale> replaced both), are still installed. Polestar never
 --     loads them.
 --     At login a non-empty result prints one line saying to reinstall: a
---     player who copied only some folders, or one level too deep, finds out;
---     the old folders get a line of their own saying to delete them.
+--     player who copied only some folders, or an old zip over a new one,
+--     finds out; the old folders get a line of their own saying to delete
+--     them.
+--   Data.InstallLine() -> string|nil
+--     A mixed install (stale non-empty) in one English line for the report
+--     (UI/Report.lua).
 
 local ADDON, ns = ...
 
@@ -95,14 +102,19 @@ function Data.Info(name)
 	return info
 end
 
--- Folders the release zip puts beside Polestar. The first two must be there;
--- the walking routes (Polestar_Nav), quest and item packs and the language
--- folder of the client's language (Names.PackName(), none in English) are optional
--- (the arrow falls back to straight lines, names and guide texts to English; a source
+-- Folders the release zip puts beside Polestar. The first four must be
+-- there (the settings window, Polestar_Options, and the game's looks with
+-- Hearth, Polestar_Looks, load on demand but are part of every release); the
+-- walking routes (Polestar_Nav), the Skin API's checks (Polestar_SkinAPI:
+-- only another addon's skin needs them, and says so when they are missing),
+-- Freedoom Arcade (Polestar_Arcade: without it there is no game to offer),
+-- quest and item packs and the language folder of the client's language
+-- (Names.PackName(), none in English) are optional (the arrow falls back to
+-- straight lines, the interface, names and guide texts to English; a source
 -- install may not build the packs), but when present they must be the same
 -- version.
-local COMPANIONS = { "AuDHD_Guides", "AuDHD_Codex", "AuDHD_Nav", "AuDHD_QuestDB", "AuDHD_ItemDB" }
-local REQUIRED = { AuDHD_Guides = true, AuDHD_Codex = true }
+local COMPANIONS = { "AuDHD_Guides", "AuDHD_Codex", "AuDHD_Options", "AuDHD_Looks", "AuDHD_Nav", "AuDHD_SkinAPI", "AuDHD_Arcade", "AuDHD_QuestDB", "AuDHD_ItemDB" }
+local REQUIRED = { AuDHD_Guides = true, AuDHD_Codex = true, AuDHD_Options = true, AuDHD_Looks = true }
 
 local function installed(name)
 	local A = C_AddOns
@@ -125,12 +137,22 @@ local function versionOf(name)
 	return type(v) == "string" and v ~= "" and v or nil
 end
 
-local function check(name, mine, missing, stale)
+-- A version Polestar can compare: a TOC without one, or a source checkout's
+-- "dev", is unknown.
+local function known(v)
+	return type(v) == "string" and v ~= "" and v ~= "dev"
+end
+
+-- One folder of ours: not installed (and required) goes to missing; a known
+-- version other than Polestar's to stale as "name version". Each folder once.
+local function check(name, s)
+	if s.seen[name] then return end
+	s.seen[name] = true
 	if not installed(name) then
-		if REQUIRED[name] then missing[#missing + 1] = name end
+		if REQUIRED[name] then s.missing[#s.missing + 1] = name end
 	else
 		local v = versionOf(name)
-		if v and mine and v ~= mine then stale[#stale + 1] = name .. " (" .. v .. ")" end
+		if known(v) and known(s.mine) and v ~= s.mine then s.stale[#s.stale + 1] = name .. " " .. v end
 	end
 end
 
@@ -147,28 +169,73 @@ local function retiredLocales()
 	return out
 end
 
+-- Not ours to compare: the Recorder ships in a zip of its own and is updated
+-- on its own, and so does a skin addon (Polestar_Skin_*, docs/SKINS-API.md:
+-- the repository's example and any skin named after it).
+local SEPARATE = { AuDHD_Recorder = true }
+
+-- Every other Polestar_* folder in the AddOns list, loaded or not: the parts
+-- for the other races and faction, the other languages, the walking maps'
+-- continents, the experimental guides (Polestar_Experimental, loaded at
+-- login unless switched off). Community addons are never named Polestar_* (pack.json
+-- refuses the prefix) but a skin may be; the old language folders have a
+-- line of their own.
+local function listed()
+	local out = {}
+	local A = C_AddOns or {}
+	local count, info = A.GetNumAddOns or GetNumAddOns, A.GetAddOnInfo or GetAddOnInfo
+	if not (count and info) then return out end
+	local ok, n = pcall(count)
+	n = ok and readable(n) or nil
+	if type(n) ~= "number" then return out end
+	local retired = {}
+	for _, l in ipairs(LOCALES) do
+		retired["AuDHD_Guides_" .. l], retired["AuDHD_Names_" .. l] = true, true
+	end
+	for i = 1, n do
+		local got, name = pcall(info, i)
+		name = got and readable(name) or nil
+		if type(name) == "string" and name:find("^AuDHD_") and not name:find("^AuDHD_Skin_") and not SEPARATE[name] and not retired[name] then out[#out + 1] = name end
+	end
+	return out
+end
+
 function Data.CheckInstall()
-	local missing, stale = {}, {}
-	local mine = ns.version
-	for _, name in ipairs(COMPANIONS) do check(name, mine, missing, stale) end
+	local s = { missing = {}, stale = {}, seen = {}, mine = ns.version }
+	for _, name in ipairs(COMPANIONS) do check(name, s) end
 	-- The language folder of the client's language (our guides' texts and
 	-- the game's names, Core/Names.lua and Core/GuideTexts.lua load it): never
 	-- missing either.
 	local language = ns.Names and ns.Names.PackName()
-	if language then check(language, mine, missing, stale) end
+	if language then check(language, s) end
 	-- Our guide pack's race part for the player's race, when the release has
 	-- one (Core/Guides.lua loads it): never missing either.
 	local race = UnitRace and readable((select(2, UnitRace("player")))) or nil
-	if type(race) == "string" and race ~= "" then check("AuDHD_Guides_" .. race, mine, missing, stale) end
+	if type(race) == "string" and race ~= "" then check("AuDHD_Guides_" .. race, s) end
 	-- Our guide pack's part for the player's faction (format 8; Core/Guides.lua
 	-- loads it): every release has it, and without it the player has no
 	-- leveling guides.
 	local faction = ns.Compat.GetPlayerFaction and ns.Compat.GetPlayerFaction()
 	if faction and installed("AuDHD_Guides") then
 		local part = "AuDHD_Guides_" .. faction
-		if installed(part) then check(part, mine, missing, stale) else missing[#missing + 1] = part end
+		if installed(part) then
+			check(part, s)
+		else
+			s.seen[part] = true
+			s.missing[#s.missing + 1] = part
+		end
 	end
-	return missing, stale, retiredLocales()
+	for _, name in ipairs(listed()) do check(name, s) end
+	return s.missing, s.stale, retiredLocales()
+end
+
+-- A mixed install in one English line for the report (UI/Report.lua), or nil
+-- when every folder is Polestar's version: "mixed: Polestar 0.3.5,
+-- Polestar_Guides 0.3.4".
+function Data.InstallLine()
+	local _, stale = Data.CheckInstall()
+	if #stale == 0 then return nil end
+	return "mixed: AuDHDEngine " .. tostring(ns.version) .. ", " .. table.concat(stale, ", ")
 end
 
 ns.OnLogin(function()
@@ -178,9 +245,9 @@ ns.OnLogin(function()
 			table.concat(retired, ", ")))
 	end
 	if #missing == 0 and #stale == 0 then return end
-	local parts = {}
-	if #missing > 0 then parts[#parts + 1] = string.format(ns.L["%s not installed"], table.concat(missing, ", ")) end
-	if #stale > 0 then parts[#parts + 1] = string.format(ns.L["%s from another version"], table.concat(stale, ", ")) end
-	ns.Print(string.format(ns.L["AuDHDEngine %s is installed incompletely: %s. Close the game, delete every AuDHDEngine folder in Interface/AddOns and unzip the latest AuDHDEngine zip there (CurseForge or GitHub Releases, not \"Source code\")."],
-		tostring(ns.version), table.concat(parts, "; ")))
+	local list = { "AuDHDEngine " .. tostring(ns.version) }
+	for _, v in ipairs(stale) do list[#list + 1] = v end
+	if #missing > 0 then list[#list + 1] = string.format(ns.L["%s not installed"], table.concat(missing, ", ")) end
+	ns.Print(string.format(ns.L["Your install is mixed or incomplete (%s). Close the game, delete every AuDHDEngine folder in Interface/AddOns and install AuDHDEngine again: with the AuDHDEngine Client, the CurseForge app, or the latest zip from GitHub Releases (not \"Source code\")."],
+		table.concat(list, ", ")))
 end)

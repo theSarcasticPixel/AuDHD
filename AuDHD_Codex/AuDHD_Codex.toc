@@ -20,7 +20,7 @@
 ## Title-zhTW: AuDHDEngine Codex
 ## Notes-zhTW: Polestar 的一部分：物品、坐騎、寵物、NPC、任務及其取得方式、地城與稀有怪物，供查詢、地城與稀有頁面使用。按需載入。
 ## Author: Polestar
-## Version: 0.3.4
+## Version: 0.4.1.1
 ## Category: AuDHDEngine
 ## Group: AuDHDEngine
 ## LoadOnDemand: 1
@@ -33,6 +33,7 @@ Items2.lua
 Items3.lua
 Items4.lua
 Items5.lua
+Items6.lua
 Mounts1.lua
 Pets1.lua
 Recipes1.lua

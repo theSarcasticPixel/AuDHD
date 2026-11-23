@@ -5,7 +5,7 @@ local ADDON, ns = ...
 local Maps = ns.Maps or {}
 ns.Maps = Maps
 
-local levels = {} -- uiMapID -> { min, max, labelX, labelY }
+local levels = {} -- uiMapID -> { min, max, labelX, labelY[, dangerFloor] }
 
 function Maps.RegisterZoneLevels(tbl)
 	if type(tbl) ~= "table" then return end
@@ -14,11 +14,13 @@ function Maps.RegisterZoneLevels(tbl)
 	end
 end
 
--- min, max | nil
+-- min, max, danger | nil: danger is the level zone danger prices the zone
+-- from (Nav/Danger.lua): its danger floor where a low pocket pulls min under
+-- the ground walks cross (Alterac Mountains, #1490), else min.
 function Maps.GetZoneLevels(uiMapID)
 	local v = uiMapID and levels[uiMapID]
 	if not v then return nil end
-	return v[1], v[2]
+	return v[1], v[2], type(v[5]) == "number" and v[5] or v[1]
 end
 
 -- Every zone with a level range: for uiMapID, min, max in Maps.EachZoneLevels() do ... end

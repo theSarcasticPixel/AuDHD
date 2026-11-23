@@ -20,15 +20,17 @@ end
 
 -- each tab: its name and its rows, { section }, { label, get, set, tip }, { slider = name } or { note = text }; extra(page, y) adds
 -- sliders or number boxes under them
--- the Dungeons tab: the heads-up, then a switch per dungeon the leveling guides have steps for (per character)
+-- the Dungeons tab: the heads-up, then a switch per dungeon the leveling guides have steps for (per character), only
+-- while the engine takes dungeons into the route (DG.routeOn)
 local function dungeonRows()
   local out = {
     { need = "dungeons", "Tell me when a dungeon opens up", function() return AuDHDDB.dungeonHeadsUp and true or false end,
       function(on) AuDHDDB.dungeonHeadsUp = on or nil end,
       "After a level-up that opens a dungeon's quests to you, once per dungeon on each character: how many to pick up and what they're worth, with a button that picks them up" },
-    { need = "dungeons", "Dungeons in the leveling guides (this character)" },
-    { need = "dungeons", note = "Off: the guides keep to the solo route. On: they take you through that dungeon where they have steps for it. The dungeon quests window: /audhd dungeons, or Alt-click the minimap button" },
   }
+  if not (ns.dungeons and ns.dungeons.routeOn()) then return out end
+  out[#out + 1] = { need = "dungeons", "Dungeons in the leveling guides (this character)" }
+  out[#out + 1] = { need = "dungeons", note = "Off: the guides keep to the solo route. On: they take you through that dungeon where they have steps for it. The dungeon quests window: /audhd dungeons, or Alt-click the minimap button" }
   for _, d in ipairs(ns.dungeons and ns.dungeons.ROUTE or {}) do
     local map = d[1]
     out[#out + 1] = { need = "dungeons", d[2] .. (d[3] and (" |cffaaaaaa(" .. d[3] .. ")|r") or ""), function() return ns.dungeons.chosen(map) end,
@@ -43,6 +45,9 @@ local TABS = {
     { need = "ui", "Hide the game's quest list with the route window", function() return AuDHDDB.hideTracker end,
       function(on) AuDHDDB.hideTracker = on or nil if ns.ui then ns.ui.applyTracker() end end,
       "All Objectives goes away while the route window is showing, and comes back when you hide the window" },
+    { need = "ui", "Mouse wheel targets quest mobs", function() return ns.questTarget and ns.questTarget.wheelOn() end,
+      function(on) if ns.questTarget then ns.questTarget.setWheel(on) end end,
+      "While the route window's Target button shows, scrolling the mouse wheel does what it does: targets the nearest mob the step wants. The rest of the time the wheel zooms as usual. Right-clicking Target switches this too" },
     { need = "arrow", "Arrow", function() return not sub("arrow").hidden end, function(on) ns.arrow.command(on and "show" or "hide") end },
     { need = "arrow", slider = "arrow" },
     { need = "arrow", "Lock the arrow", function() return sub("arrow").locked end, function(on) ns.arrow.command(on and "lock" or "unlock") end,
@@ -57,6 +62,9 @@ local TABS = {
         if ns.minimap then ns.minimap.apply() end end, "Off: /audhd minimap brings it back" },
     { "Threat on nameplates", function() return not AuDHDDB.threatHidden end,
       function(on) if ns.threat then ns.threat.command(on and "on" or "off") end end },
+    { "Combo points on the target's nameplate", function() return not AuDHDDB.comboOff end,
+      function(on) if ns.combo then ns.combo.command(on and "on" or "off") end end,
+      "Rogues, and druids in Cat Form: a pip under your target's nameplate for each combo point, all glowing when full. Needs enemy nameplates on (V)" },
     { need = "ui", "Listen button (with Chronicle)", function() return not AuDHDDB.chronicleOff end,
       function(on) AuDHDDB.chronicleOff = not on or nil if ns.ui then ns.ui.refresh() end end,
       "When the Chronicle addon is installed: a button on the route window that has Chronicle read the current step's quest out. AuDHD has no voices of its own" },
@@ -66,6 +74,36 @@ local TABS = {
     { "Reagent bag opens with the backpack", function() return not ns.altItems or ns.altItems.reagentOn() end,
       function(on) if ns.altItems then ns.altItems.setReagent(on) end end,
       "B opens your reagent bag with the backpack (the game's Open All Bags). Only when B opens your bags now" },
+    { "Bank opens with your bags", function() return not ns.altItems or ns.altItems.bankWithBags() end,
+      function(on) if ns.altItems then ns.altItems.setBankWithBags(on) end end,
+      "Your bank window, as it was when you last closed it, opens and closes with your bags, the way picked below" },
+    { "  ...with Shift-B", function() return not ns.altItems or ns.altItems.bankWay() == "key" end,
+      function() if ns.altItems then ns.altItems.setBankWay("key") end end,
+      "Shift-B opens your bags and bank together, and again closes them. Only when Shift-B opens your bags now or does nothing: bound to something else, it's left alone" },
+    { "  ...with Shift-click on the backpack", function() return ns.altItems and ns.altItems.bankWay() == "click" end,
+      function() if ns.altItems then ns.altItems.setBankWay("click") end end,
+      "Shift-clicking the backpack opens your bags and bank together. Shift-B does what the game has it do" },
+    { "Red frame round the item worth least in my bags", function() return not ns.auction or ns.auction.cheapMarkOn() end,
+      function(on) if ns.auction then ns.auction.set("ahCheapOff", on) ns.auction.changed() end end,
+      "When you need room: the stack that loses you least, by the higher of what a vendor pays and the auction price. Its tooltip says \"Lowest value\". Never what your route needs, quest items, Waylaid Crates, ammo, bags, or items with no known value" },
+    { "Gold, blue and grey frames round quest items in my bags", function() return not ns.auction or ns.auction.questFramesOn() end,
+      function(on) if ns.auction then ns.auction.set("ahQuestFramesOff", on) ns.auction.changed() end end,
+      "Gold: an item your route wants, for one of its quests or steps (your extra quests count). Blue: an item for a quest in your log the route doesn't do. Grey: a quest item none of those quests wants. Their tooltips say \"Quest item on route\", \"Quest item not in route\" or \"Quest item, none of your quests\"" },
+    { need = "routemap", "Coloured rings round people on the map (with OpenMap)", function() return not AuDHDDB.mapRingsOff end,
+      function(on) AuDHDDB.mapRingsOff = not on or nil if ns.routemap then pcall(ns.routemap.refresh) end end,
+      "On OpenMap's joined-up world map: blue round your party, orange round your raid, green round guild members who share where they are" },
+    { need = "questMarks", "+ and - buttons on the quest log", function() return not AuDHDDB.questLogMarksOff end,
+      function(on) AuDHDDB.questLogMarksOff = not on or nil if ns.questMarks then ns.questMarks.refresh() end end,
+      "In the game's quest log: a + on each quest your route doesn't do, to fit it in, and a - on each you added yourself, to take it off your route (it stays in your log)" },
+    { need = "questMarks", "List of quests you added, beside the quest log", function() return not AuDHDDB.addedListOff end,
+      function(on) AuDHDDB.addedListOff = not on or nil if ns.questMarks then ns.questMarks.refresh() end end,
+      "Every quest you added to your route, picked up or not, each with a - to take it off. Shows while the quest log is open and you have added quests" },
+    { need = "craft", "Shopping list button on the profession window", function() return not AuDHDDB.craftShopOff end,
+      function(on) AuDHDDB.craftShopOff = not on or nil if ns.craft then pcall(ns.craft.shopButtons) end end,
+      "On a recipe's page: a box for how many to make and an Add to shopping button. It puts their materials on the auction helper's Crafting list, and Buy offers only what you don't carry. Materials cheaper from a vendor are left off and named in chat. Needs the auction helper on" },
+    { "Click guild texts to copy them", function() return not ns.guildCopy or ns.guildCopy.isOn() end,
+      function(on) if ns.guildCopy then ns.guildCopy.set(on) end end,
+      "In the Guild & Communities window, a click on the Message of the Day or the Guild Information opens it in a box to copy (Ctrl+C), with any link in it on its own. /audhd motd opens it too" },
   } },
   { "Gold and XP bar", {
     { "Show the bar", function() return ns.stats and ns.stats.isShown() end,
@@ -117,6 +155,12 @@ local TABS = {
       "A dot for every single spawn of the step's mobs and objects (busy places get crowded)" },
     { need = "routemap", "Where the step's mobs are: none", function() return ns.routemap and ns.routemap.spawnMode() == "off" end,
       function(on) if ns.routemap then ns.routemap.setSpawnMode(on and "off" or "camps") end end },
+    { need = "routemap", "All herb nodes", function() return ns.gather and ns.gather.allOn("herb") end,
+      function(on) if ns.gather then ns.gather.setAll("herb", on) end end,
+      "Every herb node we know on the world map and minimap, not only those a tracked gathering list needs, and every herb you've picked (remembered for all your characters). Grey: your Herbalism is too low for it" },
+    { need = "routemap", "All ore nodes", function() return ns.gather and ns.gather.allOn("mine") end,
+      function(on) if ns.gather then ns.gather.setAll("mine", on) end end,
+      "Every ore node we know on the world map and minimap, not only those a tracked gathering list needs, and every node you've mined (remembered for all your characters). Grey: your Mining is too low for it" },
   } },
   { "Automation", {
     { note = "Hold Shift to pause it (at a quest giver, a vendor)." },
@@ -140,9 +184,12 @@ local TABS = {
     { "Food buff button", function() return not (AuDHDDB.buffOff and AuDHDDB.buffOff.food) end,
       function(on) if ns.imbue then ns.imbue.command(on and "on" or "off", "food") end end,
       "A button when you're not Well Fed and have food in your bags that does it" },
-    { "Scroll buff button", function() return not (AuDHDDB.buffOff and AuDHDDB.buffOff.scroll) end,
+    { "Scroll and elixir buff button", function() return not (AuDHDDB.buffOff and AuDHDDB.buffOff.scroll) end,
       function(on) if ns.imbue then ns.imbue.command(on and "on" or "off", "scrolls") end end,
-      "A button when a buff scroll in your bags (Stamina, Agility...) has a buff that isn't on you, the others missing under it. Not while the class buff it won't stack with is on" },
+      "A button when a buff scroll or elixir in your bags (Stamina, Agility...) has a buff that isn't on you, the others missing under it. Not while the class buff it won't stack with is on. Potions never" },
+    { "Battle Shout button in fights", function() return not (AuDHDDB.buffOff and AuDHDDB.buffOff.shout) end,
+      function(on) if ns.imbue then ns.imbue.shoutCommand(on and "on" or "off") end end,
+      "Warriors: a Battle Shout button in fights, there only while Battle Shout isn't on you. It shows while this window is open, so you can drag it where you want it" },
     { "Sell and train reminders", function() return not AuDHDDB.servicesOff end,
       function(on) AuDHDDB.servicesOff = not on or nil if ns.services then ns.services.check() end end,
       "Near a vendor with full bags, or your trainer with new skills to learn" },
@@ -179,17 +226,20 @@ local TABS = {
     { "  ...only remind me with a full stack", function() return ns.services.cfg().mailFullStack and true or false end,
       function(on) ns.services.cfg().mailFullStack = on or nil if ns.services then ns.services.check() end end,
       "The reminder waits for a BoE, or a material you'd send that makes a whole stack (20 Copper Ore, say), so you don't pay postage for one ore. Send all still sends everything" },
+    { "Forward button on opened mail", function() return not ns.mailForward or ns.mailForward.on() end,
+      function(on) if ns.mailForward then ns.mailForward.set(on) end end,
+      "A Forward button on a mail with items or money: pick one of your alts and it takes them out and mails them on (Fwd: and the subject). Postage is yours. Not Cash on Delivery mail" },
     { "Basic: everything to one bank alt", function() return not (ns.services.cfg().altMail and ns.services.cfg().altMail.mode == "prof") end,
       function() ns.services.cfg().altMail = ns.services.cfg().altMail or {} ns.services.cfg().altMail.mode = nil end },
     { "Professions: each kind of item to its own alt", function() return ns.services.cfg().altMail and ns.services.cfg().altMail.mode == "prof" end,
       function(on) ns.services.cfg().altMail = ns.services.cfg().altMail or {} ns.services.cfg().altMail.mode = on and "prof" or nil end,
-      "Herbs to your alchemist, ore to your blacksmith and so on. What no row takes, and rows left empty, go to Everything else; with that empty too, they stay in your bags" },
+      "Herbs to your alchemist, ore to your blacksmith and so on. What no row takes, and rows left empty, go to Everything else; with that empty too, to your bank alt (the Basic name), else they stay in your bags" },
     { "Show what my characters carry on item tooltips", function() return not ns.altItems or ns.altItems.on() end,
       function(on) if ns.altItems then ns.altItems.setOn(on) end end,
       "Item tooltips list which of your characters on this realm have one, in their bags, bank or mail (not worn gear). Find an item... searches them all" },
     { "Alts and Bank buttons on the backpack", function() return not ns.altItems or ns.altItems.bagsButtonOn() end,
       function(on) if ns.altItems then ns.altItems.setBagsButton(on) end end,
-      "Alts: pick one of your characters and see their bags, bank or mail as if they were yours, or Show all. Also /audhd bags. Bank: your own bank, as it was when you last closed it. Shift-B opens your bags and bank together" },
+      "Alts: pick one of your characters and see their bags, bank or mail as if they were yours, or Show all. Also /audhd bags. Bank: your own bank, as it was when you last closed it" },
   }, extra = "altmail" },
   -- the auction house
   { "Auction house", {
@@ -201,10 +251,10 @@ local TABS = {
       "Reads every auction's price when you open the auction house, at most once every 15 minutes (the game's limit)" },
     { "Auction prices on item tooltips", function() return not ns.auction or ns.auction.tipsOn() end,
       function(on) if ns.auction then ns.auction.set("ahTipsOff", on) end end,
-      "The cheapest price each from your last scan or search, and when it was seen" },
+      "The cheapest price each from your last scan or search, and when it was seen. In your profession window, what a recipe's materials cost and its profit, on the item's tooltip and after each recipe's name; the same on patterns" },
     { "Item values on trainer recipes", function() return not ns.trainerValue or ns.trainerValue.on() end,
       function(on) AuDHDDB.trainerValueOff = not on or nil end,
-      "At a profession trainer, a recipe's tooltip shows what the item it makes fetches at a vendor, at auction and disenchanted, what its reagents cost at auction, and the return" },
+      "At a profession trainer, a recipe's tooltip shows what the item it makes fetches at a vendor, at auction and disenchanted, what its reagents cost (at auction, or from a vendor when cheaper), and the return" },
     { "Remind me to sell near an auctioneer", function() return not ns.auction or ns.auction.remindOn() end,
       function(on) if ns.auction then ns.auction.set("ahRemindOff", on) end end,
       "Only when you are already by an auctioneer in a city, and your bags hold things worth at least 50s more there than a vendor pays. Never a detour" },
@@ -214,9 +264,6 @@ local TABS = {
     { "V/DE on those items in my bags", function() return not ns.auction or ns.auction.bagMarksOn() end,
       function(on) if ns.auction then ns.auction.set("ahBagMarksOff", on) ns.auction.changed() end end,
       "A red V/DE on their bag slots, so at a vendor you can see what to sell there or disenchant. Only items your scans have seen on the auction house" },
-    { "Grey frame round the item worth least in my bags", function() return not ns.auction or ns.auction.cheapMarkOn() end,
-      function(on) if ns.auction then ns.auction.set("ahCheapOff", on) ns.auction.changed() end end,
-      "When you need room: the stack that loses you least, by the higher of what a vendor pays and the auction price. Never what your route needs, quest items, ammo, bags, or items with no known value" },
   }, extra = { "ahVendor", "shopBanker" } },
   { "Dungeons", dungeonRows() },
   { "Rares", {
@@ -228,6 +275,9 @@ local TABS = {
     { "Mouse wheel targets rares", function() return AuDHDDB.rareWheel end,
       function(on) AuDHDDB.rareWheel = on or nil if ns.rare then ns.rare.applyWheel() end end,
       "While the rare button shows, scrolling the mouse wheel clicks it (cycles /tar through nearby rares)" },
+    { "Action bar keys target rares", function() return AuDHDDB.rareKeys end,
+      function(on) AuDHDDB.rareKeys = on or nil if ns.rare then ns.rare.applyWheel() end end,
+      "While the rare button shows, each key on your action bars targets the rare first, then does its own spell, as if every spell had /tar in front of it. Movement and mouse clicks stay as they are. Bar addons with their own buttons aren't covered" },
   } },
   { "Party", {
     { "Buttons to ask the party for buffs", function() return not (AuDHDDB.buffAsk and AuDHDDB.buffAsk.off) end,
@@ -254,6 +304,9 @@ local TABS = {
       function() if ns.fishing then ns.fishing.command("4") end end },
     { "Mouse button 5", function() return ns.fishing and ns.fishing.button() == "BUTTON5" end,
       function() if ns.fishing then ns.fishing.command("5") end end },
+    { "Space bar", function() return ns.fishing and ns.fishing.button() == "SPACE" end,
+      function() if ns.fishing then ns.fishing.command("space") end end,
+      "While a fishing pole is in your hands the space bar fishes instead of jumping. In combat, or with no pole, it jumps as always" },
     { "Put on a lure first", function() return ns.fishing and ns.fishing.lureOn() end,
       function(on) if ns.fishing then ns.fishing.command("lure " .. (on and "on" or "off")) end end,
       "No lure on the pole and one in your bags: the click puts the best one your skill can use on, the next click casts" },
@@ -296,7 +349,7 @@ local TABS = {
     { note = "/audhd share list: the quests you've logged.  /audhd share stop: stop logging.  /audhd share show <quest ID>: the log as text to copy." },
     { "Sending a log" },
     { note = "Open /audhd share show, press Select all, then Ctrl+C. Paste it into a new issue on GitHub, or a comment on the CurseForge page (links below). The text has no character names, realm or account: only race, class, level and build." },
-    { note = "Or attach the saved file, written when you /reload or log out: WTF/Account/<account>/SavedVariables/AuDHD.lua. It has your drop counts from mob tooltips too, but also your character names and realms." },
+    { note = "Or attach the saved files, written when you /reload or log out: WTF/Account/<account>/SavedVariables/AuDHD.lua, and AuDHD_Shared.lua beside it for your drop counts from mob tooltips. Both have your character names and realms in them." },
   }, extra = "help" },
 }
 
@@ -672,7 +725,7 @@ end
 local PICKS = {
   food = { title = "Tick the food you'd rather eat", none = "No food that makes you Well Fed in your bags",
            choices = function() return ns.imbue.foodChoices() end, set = function(id, on) ns.imbue.setFoodPref(id, on) end },
-  scrolls = { title = "Tick the scrolls to be reminded of", none = "No buff scrolls in your bags",
+  scrolls = { title = "Tick the scrolls and elixirs to be reminded of", none = "No buff scrolls or elixirs in your bags",
               choices = function() return ns.imbue.scrollChoices() end, set = function(id, on) ns.imbue.setScrollOn(id, on) end },
 }
 local foodPick
@@ -815,18 +868,18 @@ function EXTRA.food(page, y)
   show()
   return y - 34
 end
--- the buff scrolls to be reminded of: all of them ticked until you untick one
+-- the buff scrolls and elixirs to be reminded of: all of them ticked until you untick one
 function EXTRA.scrolls(page, y)
   local l = page:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   l:SetPoint("TOPLEFT", PAGE_X + 4, y - 8)
-  l:SetText("Buff scrolls")
+  l:SetText("Buff scrolls and elixirs")
   local pick = ns.newFrame("Settings", "Button", nil, page, "UIPanelButtonTemplate")
   pick:SetSize(190, 22)
   pick:SetPoint("LEFT", l, "RIGHT", 10, 0)
   pick:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    GameTooltip:SetText("Buff scrolls")
-    GameTooltip:AddLine("The buff scrolls in your bags: untick one to never be reminded of it", 1, 1, 1, true)
+    GameTooltip:SetText("Buff scrolls and elixirs")
+    GameTooltip:AddLine("The buff scrolls and elixirs in your bags: untick one to never be reminded of it", 1, 1, 1, true)
     GameTooltip:Show()
   end)
   pick:SetScript("OnLeave", function() GameTooltip:Hide() end)
@@ -918,7 +971,7 @@ function EXTRA.altmail(page, y)
   y = y - 22
 
   sections.basic = section()
-  altRow(sections.basic, "Bank alt", "Everything mailable goes to this character",
+  altRow(sections.basic, "Bank alt", "Everything mailable goes to this character. In Professions, what no row and no Everything else takes",
     function() return ns.services.cfg().bankAlt end,
     function(v) if sv then sv.command(v or "clear") end end,
     function() return ns.services.cfg().bankAltOther end, function(v) ns.services.cfg().bankAltOther = v end)
@@ -1116,6 +1169,9 @@ local function create()
   frame:SetScript("OnDragStart", frame.StartMoving)
   frame:SetScript("OnDragStop", frame.StopMovingOrSizing)
   frame:SetScript("OnShow", refresh)
+  -- (the Battle Shout button shows while this is open, to drag)
+  frame:HookScript("OnShow", function() if ns.imbue and ns.imbue.shoutPlace then pcall(ns.imbue.shoutPlace, true) end end)
+  frame:HookScript("OnHide", function() if ns.imbue and ns.imbue.shoutPlace then pcall(ns.imbue.shoutPlace, false) end end)
   local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
   title:SetPoint("TOPLEFT", 12, -10)
   title:SetText("AuDHD settings")

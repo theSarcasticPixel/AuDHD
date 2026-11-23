@@ -4,19 +4,30 @@
 -- in tools/lib/codex/pack.js). The pack calls Register per chunk of a group
 -- with two long strings (names and compact records, one line per entry) and
 -- RegisterIndex once per searchable kind. Nothing is parsed at load or
--- indexed afterwards: an entry is one plain find of "\n" .. id .. "\t" in its
--- chunk (tens of microseconds), and a record is decoded on first access
--- (cached weakly). Contract: docs/ARCHITECTURE.md, "Lookup".
+-- indexed afterwards: an entry is found by halving its chunk's id-ordered
+-- lines (fieldAt), a record is decoded on first access (cached weakly), and
+-- an id a group lacks is remembered as absent until the group's chunks
+-- change. Contract: docs/ARCHITECTURE.md, "Lookup".
 --
 --   Codex.Load() -> loaded, reason   -- Data.Pack("Polestar_Codex"); fires CODEX_LOADED(meta) once
 --   Codex.IsLoaded() ; Codex.Meta()
 --   Codex.Item(id) / Npc(id) / Object(id) / Quest(id) / Instance(key) / Zone(id) / Faction(id)
 --       (a quest's `xp`: its full XP reward, nil when not known or the pack predates it;
---       an event objective's `map`, `x`, `y`, `f`: where it is done, when known)
+--       a child quest's `parent`: the quest its giver wants in the log, nil when none or
+--       the pack predates it; a quest's `direct`: true when it is handed in at
+--       one talk, never in the log (Bloodpetal Sprouts, #2686);
+--       an event objective's `map`, `x`, `y`, `f`: where it is done, when known;
+--       a talk objective's `id`: the NPC to speak to, absent from packs before it;
+--       an NPC's or object's spawns { map, x, y, f, z }: z the height of its
+--       spawn there, nil when not known or the pack predates it)
 --   Codex.FollowUps(questId) -> { quest, ... }   -- the quests whose pre or preAny names it
 --   Codex.Spell(spellId) -> { id, kind, item, name, class } | nil
+--   Codex.RecipeItems(spellId) -> { itemId, ... } | nil   -- the recipe items that teach a craft
+--       (each recipe item's record names its spell), in pack order; built on the first ask (#2505)
 --   Codex.Name(kind, id) -> name | nil   -- no decoding; "item" spans every item kind,
 --                                           "npc" npc + rare, "object" object + treasure
+--   Codex.EnglishName(kind, id) -> name | nil   -- as Name, always the pack's English (a
+--                                           guide's `keywords` are English)
 --   Codex.Index(kind) -> blob | nil      -- the search index of a kind (item mount pet recipe
 --       tabard npc rare quest zone instance treasure), never loads the pack; lines
 --       "\2" .. folded .. "\1" .. id .. "," .. quality .. "," .. status .. "," .. #name .. "\n"
@@ -46,7 +57,7 @@ ns.Codex = Codex
 
 local PACK = "AuDHD_Codex"
 
-local type, tonumber, pairs = type, tonumber, pairs
+local type, tonumber, pairs, floor = type, tonumber, pairs, math.floor
 local char, byte, sub, find, gsub, gmatch = string.char, string.byte, string.sub, string.find, string.gsub, string.gmatch
 
 -- group -> { chunk, ... }; chunk = { lo, hi (numeric id range | nil), names (blob), recs (blob | nil) }
@@ -54,7 +65,9 @@ local chunks = {}
 local indexes = {} -- kind -> search blob
 local cache = {} -- group -> { [id] = record | false } (weak values)
 local roleCache = {} -- role -> { npcId, ... }
-local followUps = {} -- questId -> { follow-up questId, ... }
+-- "\n" .. questId .. "\t" .. follow-up ids, comma-separated, in pack order .. "\n" .. ...,
+-- lines in questId order (fieldAt finds one); built on the first FollowUps.
+local followIndex
 local meta
 local announced = false
 local WEAK = { __mode = "v" }
@@ -73,10 +86,34 @@ local function covers(c, id)
 	return type(id) == "number" and id >= lo and id <= c.hi
 end
 
--- blob, id -> offset of the field after "\n<id>\t" | nil
-local function fieldAt(blob, id)
+-- blob, id -> offset of the field after "\n<id>\t" | nil. The pack writes
+-- each blob's lines in id order (forge data codex, sortedIds), so a number
+-- id is found by halving the blob: some 20 short reads, where a plain find
+-- read up to a megabyte per lookup (a guide opened or a step changed asks
+-- for hundreds). A string id (roles, zones by name), or a line that doesn't
+-- start with a number id, takes the plain find.
+local function scan(blob, id)
 	local _, e = find(blob, "\n" .. id .. "\t", 1, true)
 	return e and e + 1
+end
+local function fieldAt(blob, id)
+	if type(id) ~= "number" then return scan(blob, id) end
+	local lo, hi = 1, #blob
+	while lo <= hi do
+		local mid = floor((lo + hi) / 2)
+		-- The first line starting at or after mid; none before hi: look lower.
+		local nl = find(blob, "\n", mid, true)
+		if not nl or nl > hi then
+			hi = mid - 1
+		else
+			local _, e, v = find(blob, "^(%d+)\t", nl + 1)
+			v = tonumber(v)
+			if not v then return scan(blob, id) end
+			if v == id then return e + 1 end
+			if v < id then lo = nl + 1 else hi = mid - 1 end
+		end
+	end
+	return nil
 end
 
 -- blob, offset -> the rest of that line
@@ -160,7 +197,8 @@ local SOURCE = {
 local BOOL_FIELD = { limited = true, choice = true }
 local STRING_FIELD = { instance = true }
 
-local OBJECTIVE = { k = "kill", i = "item", o = "object", e = "event" }
+-- s: a talk-to objective (an NPC to speak to); `t` alone is the tame flag.
+local OBJECTIVE = { k = "kill", i = "item", o = "object", e = "event", s = "talk" }
 
 ---------------------------------------------------------------------------
 -- Decoding helpers
@@ -218,23 +256,41 @@ local function decodeSource(field)
 		end
 	end
 	src.from = provenance(parts[#fields + 1] or "")
+	-- Optional tail after provenance: all quests must be held OR completed.
+	-- Its absence is the original format; older readers ignore this tail.
+	local requires = parts[#fields + 2]
+	if (src.type == "drop" or src.type == "object") and requires and requires ~= "" then
+		src.requiresQuests = numbers(unesc(requires))
+	end
 	if src.type == "craft" and src.skillLine then
 		src.profession = nameOf("skill", src.skillLine)
 	end
 	return src
 end
 
--- "map,f,x,y,x,y" groups (fields first..n of t) -> flat { { map, x, y, f } }
-local function decodeSpawns(t, first, n)
+-- "map,f,x,y,x,y" groups (fields first..n of t) -> flat { { map, x, y, f, z } }.
+-- heights: the record's "z" field without its letter, one height per point in
+-- the same order ("" for none), or nil; z is the height of the entity's spawn
+-- at that place (#1024: the arrow then walks to its floor).
+local function decodeSpawns(t, first, n, heights)
 	local out = {}
+	local zs = heights and split(heights, ",")
 	for i = first, n do
 		local g, m = split(t[i], ",")
 		local map, f = tonumber(g[1]), g[2] ~= "" and g[2] or nil
 		for k = 3, m - 1, 2 do
-			out[#out + 1] = { map = map, x = tonumber(g[k]) / 10, y = tonumber(g[k + 1]) / 10, f = f }
+			local p = #out + 1
+			out[p] = { map = map, x = tonumber(g[k]) / 10, y = tonumber(g[k + 1]) / 10, f = f, z = zs and tonumber(zs[p]) or nil }
 		end
 	end
 	return out
+end
+
+-- The record's spawn heights field (the last of t..n when it starts with "z"):
+-- its text without the letter, and the new n.
+local function heightsField(t, n)
+	if n >= 1 and sub(t[n], 1, 1) == "z" then return sub(t[n], 2), n - 1 end
+	return nil, n
 end
 
 ---------------------------------------------------------------------------
@@ -265,6 +321,8 @@ local function decodeNpc(group, id, s)
 	local t, n = split(s, ";")
 	local title
 	if n >= 8 and sub(t[n], 1, 1) == "t" then title, n = unesc(sub(t[n], 2)), n - 1 end
+	local heights
+	heights, n = heightsField(t, n)
 	local flags = t[4] or ""
 	local roles = {}
 	if t[6] and t[6] ~= "" then
@@ -282,20 +340,28 @@ local function decodeNpc(group, id, s)
 		roles = roles,
 		subName = title,
 		loot = numbers(t[7]),
-		spawns = decodeSpawns(t, 8, n),
+		spawns = decodeSpawns(t, 8, n, heights),
 	}
 end
 
+-- An object record: treasure;loot;spawn groups...[;z<heights>][;m<faction>][;i<instance>] (the instance an
+-- object lies in, last: Upper Blackrock Spire's Rookery Eggs).
 local function decodeObject(group, id, s)
 	local t, n = split(s, ";")
+	local instance
+	if n >= 3 and sub(t[n], 1, 1) == "i" then
+		instance, n = unesc(sub(t[n], 2)), n - 1
+	end
 	local mailbox, faction
 	if n >= 3 and (t[n] == "m" or t[n] == "mA" or t[n] == "mH" or t[n] == "mAH") then
 		mailbox, faction = true, sub(t[n], 2)
 		if faction == "" then faction = nil end
 		n = n - 1
 	end
-	return { id = id, name = nameOf(group, id), treasure = t[1] == "1", mailbox = mailbox,
-		faction = faction, loot = numbers(t[2]), spawns = decodeSpawns(t, 3, n) }
+	local heights
+	heights, n = heightsField(t, n)
+	return { id = id, name = nameOf(group, id), treasure = t[1] == "1", mailbox = mailbox, instance = instance,
+		faction = faction, loot = numbers(t[2]), spawns = decodeSpawns(t, 3, n, heights) }
 end
 
 local function decodeQuest(group, id, s)
@@ -324,16 +390,53 @@ local function decodeQuest(group, id, s)
 		elseif lead == "x" then
 			-- Its full XP reward: x<xp>.
 			rec.xp = tonumber(sub(f, 2))
+		elseif lead == "c" then
+			-- The quests whose taking closes it for good (#1996): c<id>,<id>...
+			rec.closedBy = numbers(sub(f, 2))
+		elseif lead == "u" then
+			-- A child quest's parent, which must be in the log: u<quest>.
+			rec.parent = tonumber(sub(f, 2))
+		elseif lead == "h" then
+			-- How it is done beyond its objectives, in our words (#2714): h<text>.
+			rec.how = unesc(sub(f, 2))
+		elseif f == "d" then
+			-- Handed in at one talk, never in the log (#2686: Bloodpetal Sprouts).
+			rec.direct = true
 		elseif f == "t" then
 			-- The kill objective before it is a beast to tame (Taming the Beast).
 			local o = rec.objectives[#rec.objectives]
 			if o then o.tame = true end
+		elseif lead == "a" then
+			-- The kill objective before it is done by using this item on the
+			-- NPC (the Codex build's useItem, #2468): a<item>.
+			local o = rec.objectives[#rec.objectives]
+			if o then o.useItem = tonumber(sub(f, 2)) end
+		elseif lead == "m" then
+			-- The kill objective before it is of a target this item calls up
+			-- (the Codex build's summonItem, #2326: Yeh'kinya's Bramble on a dead
+			-- Vale Screecher calls up the Screecher Spirit): m<item>.
+			local o = rec.objectives[#rec.objectives]
+			if o then o.summonItem = tonumber(sub(f, 2)) end
+		elseif lead == "g" then
+			-- The creatures that item is used on (#2578: the Vale Screechers the
+			-- bramble is used on, dead): g<npc>,<npc>...
+			local o = rec.objectives[#rec.objectives]
+			if o then o.summonOn = numbers(sub(f, 2)) end
 		elseif lead == "p" then
 			-- Where the objective before it is done (an event's area): p<map>,<x>,<y>,<f>.
 			local o = rec.objectives[#rec.objectives]
 			local _, _, map, x, y, fac = find(f, "^p(%d+),(%-?%d+),(%-?%d+),(%a*)$")
 			if o and map then
 				o.map, o.x, o.y, o.f = tonumber(map), tonumber(x) / 10, tonumber(y) / 10, fac ~= "" and fac or nil
+			end
+		elseif lead == "w" then
+			-- Hostile elites at the objective before it, for a side (the Codex build's
+			-- mark, #1778): w<A|H><rank>,<level> -> o.elites[side] = { rank, lvl }.
+			local o = rec.objectives[#rec.objectives]
+			local _, _, side, rank, lvl = find(f, "^w([AH])(%d+),(%d*)$")
+			if o and side then
+				o.elites = o.elites or {}
+				o.elites[side] = { rank = tonumber(rank), lvl = tonumber(lvl) }
 			end
 		end
 	end
@@ -428,7 +531,8 @@ function Codex.Register(group, names, recs, lo, hi)
 	}
 	cache[group] = nil
 	if group == "role" then roleCache = {} end
-	if group == "quest" then followUps = {} end
+	if group == "quest" then followIndex = nil end
+	if group == "recipe" then Codex.recipeIndex = nil end
 end
 
 function Codex.RegisterIndex(kind, blob)
@@ -469,15 +573,25 @@ local function ready()
 	return (Codex.Load())
 end
 
--- group, id -> record | nil (decoded once)
+-- group, id -> record | nil (decoded once; an absent id is kept as false)
 local function get(group, id)
 	local c = cache[group]
 	if c then
 		local rec = c[id]
 		if rec ~= nil then return rec or nil end
 	end
+	if id == nil then return nil end
+	if not c then
+		-- Weak values: records nobody holds are decoded again on demand
+		-- (false, an id the group lacks, stays until Register drops the cache).
+		c = setmetatable({}, WEAK)
+		cache[group] = c
+	end
 	local name, chunk = entryOf(group, id)
-	if name == nil then return nil end
+	if name == nil then
+		c[id] = false
+		return nil
+	end
 	local s = recordIn(chunk, id)
 	local rec
 	if s and DECODE[group] then rec = DECODE[group](group, id, s) end
@@ -487,11 +601,6 @@ local function get(group, id)
 		rec.title = shown(nk, id, rec.title or name)
 	elseif nk then
 		rec.name = shown(nk, id, rec.name)
-	end
-	if not c then
-		-- Weak values: records nobody holds are decoded again on demand.
-		c = setmetatable({}, WEAK)
-		cache[group] = c
 	end
 	c[id] = rec
 	return rec
@@ -529,35 +638,57 @@ function Codex.Quest(id)
 	return get("quest", id)
 end
 
+-- Read only the prerequisite fields, not the names, objectives or reward text.
+-- Older records can end after pre (field 12), before preAny (field 15).
+local PRE = "\n(%d+)\t" .. string.rep("[^;\n]*;", 11) .. "([^;\n]*)()"
+local ANY = "^;[^;\n]*;[^;\n]*;([^;\n]*)"
+
+local function buildFollowIndex()
+	local byParent, parents = {}, {}
+	local function add(parent, child)
+		local prev = byParent[parent]
+		if not prev then
+			parents[#parents + 1] = parent
+			byParent[parent] = child
+		elseif type(prev) == "string" then
+			if prev ~= child then byParent[parent] = { prev, child } end
+		elseif prev[#prev] ~= child then
+			prev[#prev + 1] = child
+		end
+	end
+	local function links(field, child)
+		for token in gmatch(field, "[^,]+") do
+			local parent = tonumber(token)
+			if parent then add(parent, child) end
+		end
+	end
+	for _, c in ipairs(chunks.quest or {}) do
+		local recs = c.recs or ""
+		for child, pre, at in gmatch(recs, PRE) do
+			if pre ~= "" then links(pre, child) end
+			local any = recs:match(ANY, at)
+			if any and any ~= "" then links(any, child) end
+		end
+	end
+	table.sort(parents)
+	for i, parent in ipairs(parents) do
+		local children = byParent[parent]
+		parents[i] = "\n" .. parent .. "\t" .. (type(children) == "table" and table.concat(children, ",") or children)
+	end
+	return table.concat(parents)
+end
+
 -- questId -> { quest, ... }: the quests whose `pre` or `preAny` names it, in
--- pack order. One pass over the quest records per quest asked (the ids found
--- are kept until the quest chunks change).
+-- pack order, each once. The first ask reads the quest records once into
+-- followIndex (until the quest chunks change); each ask then halves it.
 function Codex.FollowUps(id)
 	id = tonumber(id)
 	if not (id and ready()) then return {} end
-	local ids = followUps[id]
-	if not ids then
-		ids = {}
-		local needle = tostring(id)
-		for _, c in ipairs(chunks.quest or {}) do
-			if c.recs then
-				for qid, s in gmatch(c.recs, "\n([^\t\n]*)\t([^\n]*)") do
-					if find(s, needle, 1, true) then
-						local t = split(s, ";")
-						local hit = false
-						for _, f in ipairs({ t[12], t[15] }) do
-							for _, p in ipairs(numbers(f)) do hit = hit or p == id end
-						end
-						if hit then ids[#ids + 1] = key(qid) end
-					end
-				end
-			end
-		end
-		followUps[id] = ids
-	end
+	if not followIndex then followIndex = buildFollowIndex() end
 	local out = {}
-	for _, qid in ipairs(ids) do
-		local q = get("quest", qid)
+	local at = fieldAt(followIndex, id)
+	for qid in gmatch(at and lineFrom(followIndex, at) or "", "%d+") do
+		local q = get("quest", tonumber(qid))
 		if q then out[#out + 1] = q end
 	end
 	return out
@@ -586,6 +717,31 @@ function Codex.Spell(id)
 	return get("spell", id)
 end
 
+-- spellId -> the recipe items whose record names it (field 3 of an item record:
+-- quality and flags; required level; spell), read off the raw records without
+-- decoding them; kept on Codex.recipeIndex until another recipe chunk registers.
+function Codex.RecipeItems(spell)
+	spell = tonumber(spell)
+	if not (spell and ready()) then return nil end
+	local index = Codex.recipeIndex
+	if not index then
+		index = {}
+		for _, c in ipairs(chunks.recipe or {}) do
+			for id, sp in gmatch(c.recs or "", "\n(%d+)\t[^;\n]*;[^;\n]*;(%d+)") do
+				sp = tonumber(sp)
+				local list = index[sp]
+				if not list then
+					list = {}
+					index[sp] = list
+				end
+				list[#list + 1] = tonumber(id)
+			end
+		end
+		Codex.recipeIndex = index
+	end
+	return index[spell]
+end
+
 function Codex.Name(kind, id)
 	if id == nil or not ready() then return nil end
 	if kind ~= "instance" then id = tonumber(id) or id end
@@ -599,6 +755,16 @@ function Codex.Name(kind, id)
 	end
 	local name = nameOf(kind, id)
 	return name and shown(NAMES_KIND[kind], id, name)
+end
+
+function Codex.EnglishName(kind, id)
+	if id == nil or not ready() then return nil end
+	if kind ~= "instance" then id = tonumber(id) or id end
+	for _, g in ipairs(SPAN[kind] or { kind }) do
+		local name = nameOf(g, id)
+		if name then return name end
+	end
+	return nil
 end
 
 -- Decoded records carry translated names: drop them when the names pack

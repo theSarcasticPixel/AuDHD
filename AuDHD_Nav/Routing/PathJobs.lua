@@ -49,10 +49,25 @@ local function foreground(job)
 	return job.notify ~= nil or job.prefetch or (job.targets == nil and not job.costOnly)
 end
 
--- The queue index of the next job to slice: the first foreground one, else the first; and whether another job of
--- the same class stays queued (it then gets half the budget, the rest left for the others).
+-- The queue index of the next job to slice: an answer's callback first (it searches nothing), then an urgent job
+-- (job.urgent, set by the caller on a handle: the walk the arrow is on, Polestar's Nav/Walk.lua) with the whole
+-- budget, then the first foreground one, else the first; and whether another job of the same class stays queued (it
+-- then gets half the budget, the rest left for the others). An urgent search waits for nobody: while the player
+-- walks on, every frame it shares is yards it lands behind them.
 local function nextJob()
-	local first
+	local first, urgent
+	for i = 1, #queue do
+		local job = queue[i]
+		if job.notify then
+			return i, false
+		end
+		if job.urgent and not job.cancelled and not urgent then
+			urgent = i
+		end
+	end
+	if urgent then
+		return urgent, false
+	end
 	for i = 1, #queue do
 		if foreground(queue[i]) then
 			if first then
@@ -71,15 +86,28 @@ end
 -- so a fast frame is never doubled (0.3.1 grew it to 8 ms at 100 fps or more, halving the frame rate while a
 -- search ran).
 
--- With the queue empty the router rests: decoded clusters and the decoder's scratch stay for the next search (a walk
--- or measure from nearby reads the same clusters) until it has rested Path.restSeconds, then Grid.Idle drops them.
+-- With the queue empty the router rests: Grid.Rest trims the decoded graph to Path.graphRestKB and the endpoint trees
+-- to the newest Path.restTrees, Search.Rest drops the endpoint trees' pool, and decoded clusters, the decoder's
+-- scratch and the kept endpoint trees stay for the next search (a walk or measure from nearby reads the same
+-- clusters) until it has rested Path.restSeconds, then Grid.Idle drops them. The search scratch (Search.Spare: the
+-- abstract A*'s tables, keyed by entrance ids, the heap and the grid trees; a long walk's is ~15 MB) stays
+-- Path.spareSeconds: the next search fills the same tables instead of growing new ones key by key. Until 0.3.4 every
+-- emptied queue dropped it, so a walk re-asked every few seconds (the player off the drawn line on a long walk) grew
+-- them again every time: about half of a re-search's garbage, ~1 MB a second on such a walk.
 Path.restSeconds = 60
-local rests = 0 -- times the queue emptied: a later rest makes an earlier rest's timer stale
+Path.spareSeconds = 15
+local rests = 0 -- times the queue emptied: a later rest makes an earlier rest's timers stale
 local function rest()
 	Grid.Rest()
+	Search.Rest()
 	rests = rests + 1
 	local mine = rests
 	if C_Timer and C_Timer.After then
+		C_Timer.After(Path.spareSeconds, function()
+			if mine == rests and #queue == 0 then
+				Spare(nil)
+			end
+		end)
 		C_Timer.After(Path.restSeconds, function()
 			if mine == rests and #queue == 0 then
 				Grid.Idle()
@@ -87,6 +115,7 @@ local function rest()
 		end)
 	else
 		Grid.Idle()
+		Spare(nil)
 	end
 end
 
@@ -115,15 +144,21 @@ pump = function()
 		local t0 = clock()
 		Deadline(math.min(finish, t0 + (not job.notify and shared and budget / 2 or budget)))
 		Expansions(job.expansions or 0)
-		local saved = scratch(job.scratch)
+		-- An answer's callback searches nothing: it keeps out of the scratch swap, which would hand it (and lose) the
+		-- spare a finished search just left.
+		local saved = not job.notify and scratch(job.scratch)
 		local ok, points, cost = coroutine.resume(job.co, job)
-		job.scratch = scratch(saved)
+		if saved then
+			job.scratch = scratch(saved)
+		end
 		job.expansions = Expansions()
 		job.frames = job.frames + 1
 		job.cpu = job.cpu + clock() - t0
 		Deadline(math.huge)
 		if not ok or coroutine.status(job.co) == "dead" then
-			if not job.targets and not job.notify then
+			-- A finished search's or batch's scratch is the next one's (a batch's costs and frontier are its own
+			-- tables, not the scratch's).
+			if job.scratch then
 				Spare(job.scratch)
 			end
 			job.done, job.scratch, job.co = true, nil, nil
@@ -151,9 +186,7 @@ pump = function()
 		end
 	until clock() >= finish
 	if #queue == 0 then
-		-- Exact endpoint costs survive; local trees are only useful during active work.
 		rest()
-		Spare(nil)
 	end
 	schedule()
 end

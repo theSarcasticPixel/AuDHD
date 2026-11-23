@@ -442,8 +442,9 @@ function K.food.source()
 end
 
 -- ------------------------------------------------------------------ scrolls
--- Buff scrolls. Which, by the item and its tooltip, not a list, so new ones count: a consumable scroll (its subclass,
--- or "Scroll of" in its name) whose Use: line lasts minutes or hours and doesn't speak of a weapon or a summon. Its
+-- Buff scrolls and elixirs. Which, by the item and its tooltip, not a list, so new ones count: a consumable scroll,
+-- elixir or flask (its subclass, or "Scroll of", "Elixir of", "Flask of" in its name) whose Use: line lasts minutes or
+-- hours and doesn't speak of a weapon or a summon (a potion, instant, never). Its
 -- buff: the spell it casts, by name (all ranks of Stamina share "Stamina"); the highest rank you can use. Not reminded
 -- with that buff on, nor the class buff it won't stack with. Unticked in Settings: never reminded of it. Every
 -- deciphered scroll is Mage only, so the game's "can't use" keeps them from other classes. Not Comprehension: it's for
@@ -477,7 +478,9 @@ local function scrollInfo(id)
   if classID == nil then return false end   -- not loaded: asked again
   local name = itemName(id) or ""
   local familiar = name:find("Familiar", 1, true) ~= nil
-  if not ((classID == 0 and (subID == 4 or name:find("^Scroll of"))) or (classID == 15 and familiar)) then
+  -- (consumable subclasses: 2 elixir, 3 flask, 4 scroll)
+  local kindOk = subID == 2 or subID == 3 or subID == 4 or name:find("^Scroll of") or name:find("^Elixir of") or name:find("^Flask of")
+  if not ((classID == 0 and kindOk) or (classID == 15 and familiar)) then
     scrollInfos[id] = false
     return false
   end
@@ -709,6 +712,7 @@ local function makeButton(kind)
   close:SetPoint("CENTER", b, "TOPRIGHT", 0, 0)
   close:SetFrameLevel(b:GetFrameLevel() + 2)
   close:SetScript("OnClick", function() k.closed = true I.hide(kind) end)
+  b.close = close
   -- the oil's button: what goes on the weapon next is the oil
   if kind == "oil" then b:SetScript("PreClick", function(self) if not self.dragType then db().tItem = GetTime() end end) end
   b:Hide()
@@ -833,11 +837,11 @@ function I.show(kind, src)
       if buttonList("food", b, foods(), src.item) > 0 then b.tip = b.tip .. "\nOr click one of the others under it" end
     elseif k.scroll then
       b:SetAttribute("macrotext", ("/use item:%d"):format(src.item))
-      b.msg = ("No %s: click to read %s (%d left)"):format(src.buff or "buff", itemName(src.item), count(src.item))
-      b.short = (itemName(src.item) or "Scroll"):gsub("^Scroll of ", "")
+      b.msg = ("No %s: click to use %s (%d left)"):format(src.buff or "buff", itemName(src.item), count(src.item))
+      b.short = (itemName(src.item) or "Scroll"):gsub("^Scroll of ", ""):gsub("^Elixir of ", ""):gsub("^Flask of ", "")
       b.count:SetText(count(src.item))
-      b.tip = ("Read %s for %s (%d left)"):format(itemName(src.item) or "the scroll", src.buff or "its buff", count(src.item))
-      if buttonList("scroll", b, (missingScrolls()), src.item) > 0 then b.tip = b.tip .. "\nThe scrolls for your other missing buffs are under it" end
+      b.tip = ("Use %s for %s (%d left)"):format(itemName(src.item) or "the scroll", src.buff or "its buff", count(src.item))
+      if buttonList("scroll", b, (missingScrolls()), src.item) > 0 then b.tip = b.tip .. "\nThe scrolls and elixirs for your other missing buffs are under it" end
     elseif k.imbueScroll then
       b:SetAttribute("macrotext", ("/use item:%d\n/use 16"):format(src.item))
       b.msg = ("No imbue on your weapon: click to read %s (%d left)"):format(itemName(src.item), count(src.item))
@@ -906,6 +910,91 @@ function I.sourceOf(key)
   for _, v in pairs(K) do if v.group and v.group.key == key and v.on() ~= nil then return v.source() end end
 end
 
+-- ------------------------------------------------------------------ Battle Shout, in a fight
+-- A warrior's Battle Shout button, up only in a fight: the game's own [combat] rule shows and hides it (an addon can't
+-- show a spell button mid-fight, but that rule can). Up, with the alert, while no Battle Shout is on you (another
+-- warrior's counts); see-through while one is (the game won't hide it mid-fight: a click there still shouts). Hidden
+-- out of a fight, with no rage to shout with; shown while Settings is open, to drag. No close badge: it can't be
+-- closed mid-fight. /audhd shout [off|on]
+local SHOUT, SHOUT_ID = "Battle Shout", 6673
+local SHOUT_RANKS = { 6673, 5242, 6192, 11549, 11550, 11551, 25289 }
+local shout, shoutLit, placing, shoutRule = nil, false, false, nil
+K.shout = { on = function() return nil end }   -- (makeButton's: placed after the other buttons in the row)
+local function shoutOff() return AuDHDDB.buffOff and AuDHDDB.buffOff.shout end
+function I.shoutApplies()
+  local _, class = UnitClass("player")
+  return class == "WARRIOR" and knownId(SHOUT_ID) and not shoutOff() or false
+end
+-- the button and its rule; out of a fight only (the next fight's end when it's asked in one)
+function I.shoutSetup()
+  if InCombatLockdown() then return false end
+  if not I.shoutApplies() then
+    if shout then
+      if UnregisterStateDriver then UnregisterStateDriver(shout, "visibility") end
+      shoutRule = nil
+      shout:Hide()
+    end
+    return true
+  end
+  if not shout then
+    shout = makeButton("shout")
+    shout.close:Hide()
+    shout:SetAttribute("type", "spell")
+    shout:SetAttribute("spell", SHOUT)
+    shout.icon:SetTexture(spellIcon(SHOUT))
+    shout.text:SetText(SHOUT)
+    shout.tip = "Battle Shout: there in a fight while it isn't on you. Settings, Reminders to switch it off"
+  end
+  local rule = placing and "show" or "[combat] show; hide"
+  if RegisterStateDriver then RegisterStateDriver(shout, "visibility", rule) end
+  shoutRule = rule
+  I.shoutTick()
+  return true
+end
+-- Battle Shout on you: by its spell (any rank), else by name in your buffs
+local function shoutOn()
+  local get = C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID
+  if get then
+    for _, id in ipairs(SHOUT_RANKS) do
+      local ok, a = pcall(get, id)
+      if ok and a then return true end
+    end
+  end
+  local ok, on = pcall(buffsOn)
+  return ok and on[SHOUT] or false
+end
+-- up or see-through by whether it's on you; the alert once each time it's missing in a fight
+function I.shoutTick()
+  if not (shout and I.shoutApplies()) then return end
+  local fight = InCombatLockdown()
+  local missing = not shoutOn()
+  shout:SetAlpha((missing or placing) and 1 or 0)
+  if missing and fight and not shoutLit then
+    ns.playAlert()
+    log("SHOUT_OFF", {})
+  end
+  shoutLit = missing and fight or false
+end
+-- while Settings is open: shown, to drag it where you want it
+function I.shoutPlace(on)
+  placing = on and true or false
+  I.shoutSetup()
+end
+function I.shoutCommand(arg)
+  arg = (arg or ""):lower()
+  if arg == "off" or arg == "on" then
+    AuDHDDB.buffOff = AuDHDDB.buffOff or {}
+    AuDHDDB.buffOff.shout = arg == "off" or nil
+    if not I.shoutSetup() then return "Battle Shout button " .. arg .. " after this fight" end
+    return "Battle Shout button " .. arg
+  end
+  local _, class = UnitClass("player")
+  if class ~= "WARRIOR" then return "the Battle Shout button is for warriors" end
+  if shoutOff() then return "the Battle Shout button is off (/audhd shout on)" end
+  return "the Battle Shout button comes up in fights (/audhd shout off)"
+end
+I.shoutButton = function() return shout, shoutRule end   -- (the smoke test)
+
 -- /audhd imbue [off|on]: the weapon; /audhd buffs [off|on]: the self buffs; /audhd food [off|on]: Well Fed (no word:
 -- show what's off now)
 local function groupOf(kind) local k = K[kind] return k.food and "food" or k.scroll and "scrolls" or k.buff and "buffs" or "weapon" end
@@ -940,10 +1029,16 @@ local frame = ns.newFrame("Imbue", "Frame")
 frame:RegisterEvent("PLAYER_LOGIN")
 frame:RegisterEvent("PLAYER_REGEN_ENABLED")
 frame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
+frame:RegisterEvent("PLAYER_REGEN_DISABLED")
+frame:RegisterEvent("SPELLS_CHANGED")
+if frame.RegisterUnitEvent then frame:RegisterUnitEvent("UNIT_AURA", "player") end
 frame:SetScript("OnEvent", function(_, event, unit, _, spellID)
+  if event == "UNIT_AURA" or event == "PLAYER_REGEN_DISABLED" then pcall(I.shoutTick) return end
+  if event == "SPELLS_CHANGED" then pcall(I.shoutSetup) return end
   if event == "PLAYER_LOGIN" then
     for kind in pairs(AuDHDDB.buffOff or {}) do if K[kind] then K[kind].off = true end end
-    C_Timer.NewTicker(1, function() pcall(I.check) end)
+    C_Timer.NewTicker(1, function() pcall(I.check) pcall(I.shoutTick) end)
+    pcall(I.shoutSetup)
     -- what it sees, once, for the log: which kinds apply to you and what they'd put on
     C_Timer.After(5, function()
       pcall(function()
@@ -965,6 +1060,7 @@ frame:SetScript("OnEvent", function(_, event, unit, _, spellID)
     end)
   elseif event == "PLAYER_REGEN_ENABLED" then
     -- after the fight: what had to wait
+    pcall(I.shoutSetup)
     for kind, k in pairs(K) do
       local p = k.pending
       k.pending = nil

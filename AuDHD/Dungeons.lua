@@ -27,10 +27,19 @@ DG.state = state   -- (the smoke test)
 -- the dungeons the leveling guides have steps for (`when dungeon`, by the instance's Map id), in level order, and the
 -- side whose guides have them (none: both). The smoke test checks it against the guides after each sync
 DG.ROUTE = {
-  { 389, "Ragefire Chasm", "Horde" }, { 34, "The Stockade", "Alliance" }, { 189, "Scarlet Monastery", "Alliance" },
+  { 3065, "The Hall of Thanes", "Alliance" }, { 389, "Ragefire Chasm", "Horde" }, { 43, "Wailing Caverns", "Horde" },
+  { 36, "The Deadmines", "Alliance" }, { 2999, "Ruins of Lordaeron", "Horde" }, { 33, "Shadowfang Keep", "Horde" },
+  { 34, "The Stockade", "Alliance" }, { 48, "Blackfathom Deeps", "Horde" }, { 90, "Gnomeregan", "Horde" },
+  { 2998, "Excavation Site: Wetlands", "Alliance" }, { 189, "Scarlet Monastery", "Alliance" },
   { 2959, "City of Dalaran", "Alliance" }, { 209, "Zul'Farrak" }, { 109, "Sunken Temple" }, { 230, "Blackrock Depths" },
   { 229, "Blackrock Spire" }, { 429, "Dire Maul" }, { 289, "Scholomance" }, { 329, "Stratholme" },
 }
+-- whether the engine takes dungeons into the route at all: held back, it reads every dungeon as skipped whatever is
+-- chosen, so there is nothing to switch
+function DG.routeOn()
+  local _, E = engine()
+  return E and E.DungeonRouteOn and E.DungeonRouteOn() or false
+end
 function DG.chosen(map)
   local _, E = engine()
   return E and E.DungeonChosen and E.DungeonChosen(map) or false

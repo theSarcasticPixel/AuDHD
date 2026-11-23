@@ -5,10 +5,13 @@ local F = {}
 ns.routeFix = F
 F.missed = {}   -- what no longer matches the guides: looked at after each new guide version (tools/smoke_engine.mjs)
 
-local function find(def, t, q)
+-- (by item or mob instead: a loot that starts a quest, and the kill for it, have none)
+local function find(def, t, q, item, npc)
   for s, step in ipairs(def.steps) do
     for g, goal in ipairs(step.goals) do
-      if goal.t == t and goal.quest == q then return step, g, goal end
+      local named
+      if item then named = goal.item == item elseif npc then named = goal.npc == npc else named = goal.quest == q end
+      if goal.t == t and named then return step, g, goal end
     end
   end
 end
@@ -255,8 +258,19 @@ local function patch(def)
   end
   for _, n in ipairs(fix.notes) do
     if n.guide == id then
-      local _, _, goal = find(def, n.t, n.q)
-      if goal then goal.note = n.note else missed(id, n.t .. " " .. n.q) end
+      local _, _, goal = find(def, n.t, n.q, n.item, n.npc)
+      if goal then goal.note = n.note else missed(id, n.t .. " " .. (n.q or "item " .. tostring(n.item or n.npc))) end
+    end
+  end
+  for _, o in ipairs(fix.optional or {}) do
+    if o.guide == id then
+      local _, _, goal = find(def, o.t, o.q, o.item, o.npc)
+      if goal then
+        goal.optional = true
+        if o.note then goal.note = o.note end
+      else
+        missed(id, "optional " .. o.t .. " " .. tostring(o.q or o.item or o.npc))
+      end
     end
   end
   for _, a in ipairs(fix.add) do
@@ -284,6 +298,7 @@ for _, n in ipairs(ns.routeFixes.notes) do wanted[n.guide] = true end
 for _, mv in ipairs(ns.routeFixes.move) do wanted[mv.guide] = true end
 for _, p in ipairs(ns.routeFixes.pre or {}) do wanted[p.guide] = true end
 for _, d in ipairs(ns.routeFixes.drop or {}) do wanted[d.guide] = true end
+for _, o in ipairs(ns.routeFixes.optional or {}) do wanted[o.guide] = true end
 for _, a in ipairs(ns.routeFixes.add) do wanted[a.guide] = true end
 F.wanted = wanted
 

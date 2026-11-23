@@ -11,7 +11,8 @@
 -- Colours: Nav.RGB(name) and Nav.Wash(role) read Polestar.Theme's tokens
 -- (accent, success, the arrow's arrow/arrowNear and their legible *Text
 -- forms, text, textDim, place, ink, shade; the ink washes), with a
--- fallback palette only for when Theme is not loaded.
+-- fallback palette only for when Theme is not loaded; on a light palette
+-- the text ones are the palette's paper, to read over the world.
 
 local ADDON, ns = ...
 local L = ns.L
@@ -39,11 +40,14 @@ ns.RegisterDefaults("nav", {
 	hideArrowWithGuide = false,
 	worldPins = true,
 	minimapPins = true,
+	minimapRoute = true, -- the route line (or trail) on the minimap; off keeps the pin (Maps/RouteLines.lua, Nav/Layers.lua)
 	trailDots = true,
 	openmapDots = true, -- the trail on OpenMap's stitched map (Nav/Pins.lua; OpenMap's menu switch)
 	tomtom = true,
 	useTomTomArrow = false,
 	blizzardWaypoint = false,
+	-- Hide the arrow while an addon following Polestar shows the target itself (Nav.API.Follow, `shows`).
+	arrowToFollower = false,
 	arrivalSound = true,
 	-- How distances read: "yards" (the game's unit) or "metres" (ns.FormatDistance).
 	distanceUnit = "yards",
@@ -101,18 +105,72 @@ local function themeColor(name)
 	if ok and type(r) == "number" and type(g) == "number" and type(b) == "number" then return r, g, b end
 end
 
+-- A light palette (a parchment skin: dark ink on paper) can't colour text
+-- the 3D world shows through: its ink vanishes over a night zone. Nav's
+-- text (the arrow's lines, the leg prompts' lines on the game's dark
+-- tooltip) then takes the palette's paper, outlined and shadowed in its
+-- ink, and its coloured lines are lifted toward the paper until they read
+-- on a night zone (WORLD_NIGHT) at the subject colours' floor (4.5:1).
+local WORLD_NIGHT = { 0.086, 0.098, 0.122 }
+local PAPER_TEXT, LIFTED = { "text", "textDim" }, { "place", "arrowText", "arrowNearText" }
+local function overTheWorld(T)
+	local ok, light = pcall(function() return T.IsLightPalette(T.Palette()) end)
+	if not (ok and light) then return end
+	local pr, pg, pb = themeColor("panel")
+	if not pb then return end
+	-- The ink (the palette's text, read above) goes to the shadow first.
+	local ink, shade = palette.text, palette.shade
+	shade[1], shade[2], shade[3] = ink[1], ink[2], ink[3]
+	for _, name in ipairs(PAPER_TEXT) do
+		local c = palette[name]
+		c[1], c[2], c[3] = pr, pg, pb
+	end
+	for _, name in ipairs(LIFTED) do
+		local c = palette[name]
+		for _ = 1, 24 do
+			if T.Contrast(c, WORLD_NIGHT) >= 4.5 then break end
+			c[1], c[2], c[3] = c[1] + (pr - c[1]) * 0.15, c[2] + (pg - c[2]) * 0.15, c[3] + (pb - c[3]) * 0.15
+		end
+	end
+end
+
 local function refreshPalette()
 	for name, fb in pairs(FALLBACK) do
 		local r, g, b = themeColor(name)
 		local c = palette[name]
 		c[1], c[2], c[3] = r or fb[1], g or fb[2], b or fb[3]
 	end
+	local T = ns.Theme
+	if type(T) == "table" and T.IsLightPalette and T.Palette and T.Contrast then overTheWorld(T) end
+end
+
+-- Whether the palette moved since the last theme change looked (the
+-- colours as they were then kept in `seen`).
+local seen = {}
+local function paletteMoved()
+	local moved = false
+	for name, c in pairs(palette) do
+		local s = seen[name]
+		if not s then
+			s = {}
+			seen[name] = s
+		end
+		if s[1] ~= c[1] or s[2] ~= c[2] or s[3] ~= c[3] then
+			s[1], s[2], s[3] = c[1], c[2], c[3]
+			moved = true
+		end
+	end
+	return moved
 end
 
 function Nav.RGB(name)
 	local c = palette[name] or palette.text
 	return c[1], c[2], c[3]
 end
+
+-- (): the theme's colours read again, as on every theme change; the skin
+-- picker's cards read another skin's while they paint its arrow.
+Nav.ReadPalette = refreshPalette
 
 -- An ink wash at one of the house alphas (Theme.Wash): r, g, b, a.
 function Nav.Wash(role)
@@ -169,7 +227,9 @@ end
 local engineWp    -- last waypoint announced by the Engine
 local override    -- point picked with Nav.SetTarget, kept until the step changes
 local dismissed   -- engine waypoint hidden by ClearTarget until the Engine moves on
-local target      -- what we guide to: override, else engine waypoint
+local hold        -- point held with Nav.Hold (the way back to your corpse), over everything until Nav.Unhold
+local NOTHING = {} -- the hold of Nav.HoldNothing: no target at all until Nav.Unhold
+local target      -- what we guide to: hold, else override, else engine waypoint
 local tC, tX, tY  -- target in world space (nil until resolvable)
 local tZ         -- its height: the target's `z` (a guide goal, candidate or spawn area at an NPC or object), else nil
 local arrived = false
@@ -210,8 +270,19 @@ local function announce()
 	if not ok then error(err, 0) end
 end
 
+-- The Engine's waypoint as the arrow may take it: not while dismissed, nor
+-- while paused (Pause takes the arrow; a hold and a picked point still show).
+local function engineTarget()
+	if dismissed or ns.PauseHides("arrow") then return nil end
+	return engineWp
+end
+
 local function apply(shouldAnnounce)
-	local new = override or (not dismissed and engineWp) or nil
+	local new = hold or override or engineTarget() or nil
+	if new == NOTHING then new = nil end
+	-- Held: a step, the guide's waypoint or a picked point changing under the
+	-- hold changes nothing shown (no replan, no second chime) until Nav.Unhold.
+	if hold and new == target then return end
 	target = new
 	arrived = false
 	resolve()
@@ -227,7 +298,9 @@ end
 -- ("dungeon", "trainer", "innkeeper", "flightmaster"; Nav/Handoff.lua), optional.
 -- `z`: the height of the NPC or object there (a guide goal's or candidate's
 -- compiled `z`), optional, so the walk ends on its floor.
-function Nav.SetTarget(map, x, y, label, f, stop, z)
+-- `warning`: a line the arrow shows under the label while this is the target
+-- (a dungeon entrance in the other faction's land), optional.
+function Nav.SetTarget(map, x, y, label, f, stop, z, warning)
 	map, x, y = tonumber(map), tonumber(x), tonumber(y)
 	if not (map and x and y) then return false end
 	local Engine = ns.Engine
@@ -235,13 +308,55 @@ function Nav.SetTarget(map, x, y, label, f, stop, z)
 		map = map, x = x, y = y, f = f,
 		z = type(z) == "number" and z or nil,
 		label = (label and label ~= "") and label or L["Waypoint"],
+		warning = type(warning) == "string" and warning ~= "" and warning or nil,
 		kind = "manual",
 		stop = type(stop) == "string" and stop or nil,
 		r = Nav.DEFAULT_RADIUS,
 		stepIndex = Engine and Engine.GetStepIndex and Engine.GetStepIndex() or nil,
 	}
 	apply(true)
-	return true
+	return override
+end
+
+-- The arrow held on one point (QoL/Death.lua: the way back to your corpse or
+-- the Spirit Healer) over every other target until Nav.Unhold: the guide's
+-- step and waypoint changes, and points picked by hand or set by other
+-- addons, go on underneath and show again once it lets go (a picked point
+-- only while the step is the same, as always). `z`: the floor's height there,
+-- optional (a corpse in a basement, #2106), so the walk ends on it. Returns
+-- the held target, or nil for a bad point.
+function Nav.Hold(map, x, y, label, f, z)
+	map, x, y = tonumber(map), tonumber(x), tonumber(y)
+	if not (map and x and y) then return nil end
+	hold = {
+		map = map, x = x, y = y, f = f,
+		z = type(z) == "number" and z or nil,
+		label = (label and label ~= "") and label or L["Waypoint"],
+		kind = "manual",
+		r = Nav.DEFAULT_RADIUS,
+	}
+	apply(true)
+	return hold
+end
+
+-- Lets go of the held point: the target is what it would have been without it.
+function Nav.Unhold()
+	if not hold then return end
+	hold = nil
+	apply(true)
+end
+
+function Nav.IsHeld()
+	return hold ~= nil
+end
+
+-- The arrow held on nothing (QoL/Death.lua: a corpse inside a dungeon whose
+-- entrance is not known, where no point is the way back): no arrow until
+-- Nav.Unhold, the guide's targets going on underneath as under Nav.Hold.
+function Nav.HoldNothing()
+	hold = NOTHING
+	apply(true)
+	return hold
 end
 
 -- Drops the override; the engine's waypoint stays dismissed until the Engine
@@ -266,6 +381,24 @@ end
 
 function Nav.IsOverride()
 	return override ~= nil and target == override
+end
+
+-- A point of your own that moves (a party member followed, Quests/Party.lua):
+-- the same target at its new place, so a trip on it goes on and an arrival
+-- stays one arrival, one chime, until the player is well apart again
+-- (Nav.Sample). A new target each time re-armed the arrival, and following
+-- someone you stood beside chimed every few seconds. The route is planned
+-- again. False when `t` is not the arrow's own target.
+function Nav.MoveTarget(t, map, x, y)
+	map, x, y = tonumber(map), tonumber(x), tonumber(y)
+	if not (t and map and x and y and Nav.IsOverride() and target == t) then return false end
+	t.map, t.x, t.y = map, x, y
+	resolve()
+	local T = Nav.travel
+	if T and T.Replan then T.Replan() end
+	notify("OnTarget", target)
+	announce()
+	return true
 end
 
 -- World position of the target: continentID, wx, wy, then its height when
@@ -300,6 +433,65 @@ function Nav.LiveCoords(point)
 end
 
 ---------------------------------------------------------------------------
+-- Trips: a place the player asked to be taken to (a nearby service, a
+-- dungeon's entrance, a trainer or quest giver a card or banner shows). A
+-- trip is a point picked by hand (Nav.SetTarget) that ends once its goal is
+-- reached, and the arrow is back on the guide's step: `ends` "arrive" at
+-- the arrival (after it is drawn), "instance" (a dungeon's entrance) on
+-- going through an instance's portal, in, or out when it was started
+-- inside (#1686: the way to Blackfathom Deeps outlived the run). Any other
+-- target (a step change, a goal clicked, a map click) ends it too, without
+-- a word. The guide window shows it ("On the way to <name> (<label>).")
+-- with "Back to the guide" (Nav.EndTrip). NAV_TRIP(trip | nil) fires as one
+-- starts or ends.
+---------------------------------------------------------------------------
+
+local trip
+
+local function inInstance()
+	local C = ns.Compat
+	return C and C.IsInInstance and C.IsInInstance() and true or false
+end
+
+-- `t`: what Nav.SetTarget just returned; `name`: the place, said on arrival;
+-- `label`: what it is ("Repair", "Dungeon"). -> the trip, or nil when `t`
+-- is not the arrow's own waypoint.
+function Nav.StartTrip(t, name, label, ends)
+	if not (t and Nav.IsOverride() and target == t) then return nil end
+	trip = { target = t, name = name or t.label, label = label, ends = ends == "instance" and "instance" or "arrive", inside = inInstance() }
+	ns.Fire("NAV_TRIP", trip)
+	return trip
+end
+
+-- The trip under way: { target, name, label, ends, inside }, or nil.
+function Nav.Trip()
+	if trip and not (Nav.IsOverride() and target == trip.target) then trip = nil end
+	return trip
+end
+
+-- Back to the guide: the trip's target lets go. `arrived`: said as "At <name>".
+-- False when there is no trip.
+function Nav.EndTrip(arrived)
+	local t = Nav.Trip()
+	if not t then return false end
+	trip = nil
+	Nav.ReleaseTarget()
+	ns.Print(arrived and string.format(L["At %s: the arrow is back on the guide."], t.name) or L["The arrow is back on the guide."])
+	ns.Fire("NAV_TRIP", nil)
+	return true
+end
+
+-- Any point picked by hand lets go, a trip as its banner's link ends it (the
+-- arrow's menu, the journey's header). False when the arrow is the guide's.
+function Nav.BackToGuide()
+	if Nav.EndTrip() then return true end
+	if not Nav.IsOverride() then return false end
+	Nav.ReleaseTarget()
+	ns.Print(L["The arrow is back on the guide."])
+	return true
+end
+
+---------------------------------------------------------------------------
 -- Situation sampling. Allocation-free: called from throttled OnUpdates.
 --
 -- Nav.Sample() -> state, distance, relAngle, dNorth, dWest, measured
@@ -322,8 +514,8 @@ end
 
 local function playArrival()
 	if not ns.Get("nav.arrivalSound") or (Nav.HandedOff and Nav.HandedOff()) then return end
-	local id = (SOUNDKIT and SOUNDKIT.MAP_PING) or 3175
-	if PlaySound then PlaySound(id, "SFX") end
+	-- The arrow's own sound: it plays while hiding Polestar keeps the arrow.
+	ns.PlaySound((SOUNDKIT and SOUNDKIT.MAP_PING) or 3175, "SFX", true)
 end
 
 local function toward(C, px, py, ax, ay)
@@ -377,8 +569,9 @@ function Nav.Sample()
 	local r = target.r or Nav.DEFAULT_RADIUS
 	-- Near the target, the player's floor against its height: not arrived
 	-- while a floor apart (Undercity's levels, caves, towers), and the arrow
-	-- says up or down (Nav.FloorHint).
-	if tZ and dist <= max(r * 2, 20) then
+	-- says up or down (Nav.FloorHint). Not in a place only portals reach (the
+	-- walking maps have no floor there: the Wizard's Sanctum's chamber, #1970).
+	if tZ and dist <= max(r * 2, 20) and not (T and T.place) then
 		local W = Nav.walk
 		local z = W and W.Floor and W.Floor(pc, px, py)
 		if z and abs(z - tZ) > FLOOR_GAP then floorHint = z < tZ and "up" or "down" end
@@ -481,12 +674,22 @@ local function settleStep()
 end
 
 ns.On("WAYPOINT_CHANGED", function(wp)
+	-- Another target took over: the trip is over, without a word.
+	if trip and not Nav.Trip() then ns.Fire("NAV_TRIP", nil) end
 	if firing then return end -- our own announcement
 	if dismissed and not samePoint(wp, engineWp) then dismissed = false end
 	engineWp = wp
 	if override then return end
 	pendingStep = false
 	apply(false)
+end)
+
+-- There: a trip to a place goes back to the guide, after the arrival is drawn.
+ns.On("NAV_ARRIVED", function(t)
+	if not (trip and trip.target == t and trip.ends == "arrive") then return end
+	ns.After(0, function()
+		if trip and trip.target == t then Nav.EndTrip(true) end
+	end)
 end)
 
 local function stepMoved()
@@ -510,9 +713,20 @@ ns.On("SETTING_CHANGED", function(path)
 		Nav.Refresh() -- the travel button (and the arrow, Nav.HiddenWithGuide) go and come back with the guide
 	end
 end)
+ns.On("GUIDE_SHOWN", function() Nav.Refresh() end) -- an instance hide (ns.GuideShown)
+ns.On("AUDHDENGINE_HIDDEN", function() Nav.Refresh() end) -- the arrow and its travel button (ns.ArrowHidden)
+-- Paused or resumed: the Engine's waypoint goes or comes back (a hold or
+-- a picked point over it stays as it is: no second chime).
+ns.On("AUDHDENGINE_PAUSED", function()
+	if not (hold or override) and engineTarget() ~= target then apply(true) end
+	Nav.Refresh()
+end)
 
 local function situationChanged()
 	if target and not tC then resolve() end
+	-- Through an instance's portal: a trip to a dungeon's entrance is over.
+	local t = Nav.Trip()
+	if t and t.ends == "instance" and inInstance() ~= t.inside then Nav.EndTrip(true) end
 	Nav.Refresh()
 end
 for _, event in ipairs({
@@ -524,10 +738,14 @@ end
 
 ns.OnInit(function()
 	refreshPalette()
+	paletteMoved()
 	local T = ns.Theme
 	if type(T) == "table" and type(T.OnChanged) == "function" then
 		T.OnChanged(function()
 			refreshPalette()
+			-- A live repaint (a slider dragged) changes colours alone: when
+			-- none of Nav's moved, nothing Nav shows changes either.
+			if not paletteMoved() and T.LiveChanged and T.LiveChanged() then return end
 			notify("OnTheme")
 		end)
 	end
@@ -573,23 +791,48 @@ function Nav.HandoffOption(c)
 end
 
 -- Whether hiding the guide window (ui.shown) hides the arrow now: only with
--- nav.hideArrowWithGuide on, and never on the way back to your corpse or a
--- Spirit Healer (QoL/Death.lua). The travel button goes with the window
--- either way (Nav/Prompts.lua).
+-- nav.hideArrowWithGuide on, and never while the arrow is held (Nav.Hold: the
+-- way back to your corpse or a Spirit Healer). The travel button goes with
+-- the window either way (Nav/Prompts.lua). The window's own on/off: hiding
+-- Polestar takes the arrow by ns.ArrowHidden, not by this.
 function Nav.HiddenWithGuide()
-	if ns.GuideShown() or not ns.Get("nav.hideArrowWithGuide") then return false end
-	local D = ns.QoL and ns.QoL.Death
-	return not (D and D.Guides and D.Guides(target))
+	if ns.GuideWindowOn() or not ns.Get("nav.hideArrowWithGuide") then return false end
+	return hold == nil
 end
 
--- A command that asked for the arrow while the guide hides it still takes
--- effect: says why nothing shows yet.
+-- A command that asked for the arrow while something hides it still takes
+-- effect: says why nothing shows yet, another addon keeping it out of sight
+-- included (ns.OutOfSight).
+local function arrowOutOfSight()
+	return Nav.arrow ~= nil and ns.OutOfSight(Nav.arrow.frame)
+end
 function Nav.SayGuideHidden()
-	if Nav.HiddenWithGuide() then
+	if ns.ArrowHidden() then
+		ns.Print(L["AuDHDEngine is hidden, the arrow with it: \"Keep the arrow when hidden\" in the minimap button's menu keeps it."])
+	elseif Nav.HiddenWithGuide() then
 		ns.Print(L["The guide is hidden and \"Hide the arrow with the guide\" is on, so the arrow is hidden too: /polestar show brings them back."])
+	elseif ns.PauseHides("arrow") and not (hold or override) then
+		ns.Print(L["AuDHDEngine is paused: the arrow follows the guide again once you leave the dungeon alive, or after /polestar resume."])
+	elseif arrowOutOfSight() then
+		ns.SayOutOfSight()
 	end
 end
 
+-- The arrow on or off (nav.arrow): /polestar arrow, the minimap button's menu.
+-- One that is on but kept out of sight stays on: the toggle says why it is
+-- not seen, as the window's does.
+function Nav.ToggleArrow()
+	if not ns.Get("nav.arrow") and Nav.SayHandedOff() then return end
+	if ns.Get("nav.arrow") and arrowOutOfSight() then
+		ns.SayOutOfSight()
+		return
+	end
+	ns.Set("nav.arrow", not ns.Get("nav.arrow"))
+	if ns.Get("nav.arrow") then Nav.SayGuideHidden() end
+end
+
+-- Quiet (Init.lua's RegisterCommand): the arrow's commands set the arrow and
+-- say why it does not show while Polestar is hidden.
 ns.RegisterCommand("arrow", function(rest)
 	local arg = (rest or ""):lower()
 	if arg == "reset" then
@@ -599,11 +842,9 @@ ns.RegisterCommand("arrow", function(rest)
 		ns.Set("nav.arrow", arg == "show")
 		if arg == "show" then Nav.SayGuideHidden() end
 	else
-		if not ns.Get("nav.arrow") and Nav.SayHandedOff() then return end
-		ns.Set("nav.arrow", not ns.Get("nav.arrow"))
-		if ns.Get("nav.arrow") then Nav.SayGuideHidden() end
+		Nav.ToggleArrow()
 	end
-end, L["Waypoint arrow: show, hide, reset"])
+end, L["Waypoint arrow: show, hide, reset"], true)
 
 -- Two whitespace-separated coordinates take decimal points ("45.5 30.2") or a
 -- decimal comma in both ("45,5 30,2"); otherwise a comma separates x and y
@@ -639,4 +880,4 @@ ns.RegisterCommand("way", function(rest)
 		return
 	end
 	if Nav.SetTarget(map, x, y, label ~= "" and label or nil) then Nav.SayGuideHidden() end
-end, L["Point the arrow at x y on your current map (no argument clears it)"])
+end, L["Point the arrow at x y on your current map (no argument clears it)"], true)

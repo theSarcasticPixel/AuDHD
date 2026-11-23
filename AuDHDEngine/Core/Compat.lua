@@ -182,6 +182,12 @@ function Compat.GetMoney()
 	return readable(GetMoney and GetMoney()) or 0
 end
 
+-- Whether the open merchant repairs (false with no merchant window, or a
+-- client without the call).
+function Compat.CanMerchantRepair()
+	return readable(CanMerchantRepair and CanMerchantRepair()) and true or false
+end
+
 function Compat.IsOnTaxi()
 	return readable(UnitOnTaxi and UnitOnTaxi("player")) and true or false
 end
@@ -200,6 +206,17 @@ function Compat.GetPlayerUnitPosition()
 	return x, y, type(z) == "number" and z ~= 0 and z or nil, instance
 end
 
+-- The player's run speed in yd/s (GetUnitSpeed's second value), or nil while
+-- the client keeps it secret or does not say: the travel planner's arithmetic
+-- on a secret speed was blocked and logged as Polestar's taint (#2533).
+function Compat.GetRunSpeed()
+	if not GetUnitSpeed then return nil end
+	local ok, _, run = pcall(GetUnitSpeed, "player")
+	if not ok then return nil end
+	run = readable(run)
+	return type(run) == "number" and run or nil
+end
+
 -- A spell's cooldown as GetTime start and duration; 0, 0 when it is ready
 -- or the client keeps it secret.
 function Compat.GetSpellCooldown(spellID)
@@ -214,6 +231,27 @@ function Compat.GetSpellCooldown(spellID)
 	start, duration = readable(start), readable(duration)
 	if type(start) ~= "number" or type(duration) ~= "number" then return 0, 0 end
 	return start, duration
+end
+
+-- A spell's full cooldown in seconds as the client tells it (its base
+-- cooldown, cooling down now or not), or nil when it tells none.
+function Compat.GetSpellBaseCooldown(spellID)
+	local fn = GetSpellBaseCooldown
+	if not fn then return nil end
+	local ok, ms = pcall(fn, spellID)
+	ms = ok and readable(ms) or nil
+	if type(ms) == "number" and ms > 0 then return ms / 1000 end
+	return nil
+end
+
+-- An item's full cooldown in seconds: its use spell's
+-- (Compat.GetSpellBaseCooldown), or nil.
+function Compat.GetItemBaseCooldown(itemID)
+	local fn = (C_Item and C_Item.GetItemSpell) or GetItemSpell
+	if not fn then return nil end
+	local ok, _, spellID = pcall(fn, itemID)
+	if ok and type(spellID) == "number" then return Compat.GetSpellBaseCooldown(spellID) end
+	return nil
 end
 
 -- An item's cooldown, as Compat.GetSpellCooldown.
@@ -296,6 +334,39 @@ function Compat.AddOnPresent(name)
 	return select(4, A.GetAddOnInfo(name)) and true or false
 end
 
+-- The trait configs that can hold the player's talents, most trusted first:
+-- the active spec group's combat config, the one Forever's talent frame
+-- shows (Blizzard_PlayerSpells Camelot, ClassTalentsFrameMixin:SetTab), then
+-- C_ClassTalents.GetActiveConfigID, which that frame only starts from and
+-- falls back past when it is nil (ClassTalentsFrameMixin:RefreshConfigID).
+-- -> { configID, ... } (distinct; empty while the client has none), the
+-- active spec group, that group's config, the active config (each nil when
+-- the client gives none)
+function Compat.TalentConfigs()
+	local out, group, groupConfig, activeConfig = {}, nil, nil, nil
+	local S = C_SpecializationInfo
+	if S and S.GetActiveSpecGroup and S.GetCombatConfigIDForSpecGroup then
+		local ok, g = pcall(S.GetActiveSpecGroup)
+		g = ok and readable(g) or nil
+		if type(g) == "number" then
+			group = g
+			local ok2, c = pcall(S.GetCombatConfigIDForSpecGroup, g)
+			c = ok2 and readable(c) or nil
+			if type(c) == "number" then groupConfig, out[1] = c, c end
+		end
+	end
+	local CT = C_ClassTalents
+	if CT and CT.GetActiveConfigID then
+		local ok, c = pcall(CT.GetActiveConfigID)
+		c = ok and readable(c) or nil
+		if type(c) == "number" then
+			activeConfig = c
+			if c ~= groupConfig then out[#out + 1] = c end
+		end
+	end
+	return out, group, groupConfig, activeConfig
+end
+
 ---------------------------------------------------------------------------
 -- Quests
 ---------------------------------------------------------------------------
@@ -321,8 +392,50 @@ function Compat.IsQuestReadyForTurnIn(questID)
 	return false
 end
 
+-- Whether questID is in the log and failed (an escort lost, a timer run out,
+-- an event's NPC killed): C_QuestLog.IsFailed, which Forever's client answers
+-- (the Recorder's `fail` events come from it). False without the API.
+function Compat.IsQuestFailed(questID)
+	local QL = C_QuestLog
+	if not (QL and QL.IsFailed and QL.IsOnQuest and QL.IsOnQuest(questID)) then return false end
+	return QL.IsFailed(questID) and true or false
+end
+
+-- The game's internal placeholder names (#2614; forge-guide's placeholder.rs,
+-- the same list): "[DNT] Kill Credit", a bare "Credit", "PvP Tower Credit
+-- Marker", Alterac Valley's "Trigger Ichman", "<UNUSED>". A player never reads
+-- one: the data and the compiler give such objectives their own words, and a
+-- quest-log line the game words with one reads as a line with no name yet.
+local PLACEHOLDER_TAGS = { "[DNT]", "(DNT)", "[PH]", "(DND)", "<UNUSED>", "<TEST>", "Credit Marker", "Kill Credit" }
+function Compat.Placeholder(name)
+	if type(name) ~= "string" then return false end
+	local s = name:match("^%s*(.-)%s*$")
+	if s == "Credit" or s:sub(1, 8) == "Trigger " or s:sub(1, 8) == "DND FLAG" then return true end
+	for i = 1, #PLACEHOLDER_TAGS do
+		if s:find(PLACEHOLDER_TAGS[i], 1, true) then return true end
+	end
+	return false
+end
+
+-- A quest's lines, read once per moment (ns.Moment, Core/Init.lua: the same
+-- number in the same frame means nothing Polestar knows of has changed, so
+-- neither has the log): a step's view, an evaluation or the arrival poll asks
+-- for the same quest once per goal on its line. The lines are read-only for
+-- every caller (one table per quest per moment, no longer one per call).
+local objMemo, objAt, objMoment = {}, nil, nil
 function Compat.GetQuestObjectives(questID)
 	if not (C_QuestLog and C_QuestLog.GetQuestObjectives) then return nil end
+	local now, moment = GetTime and GetTime(), ns.Moment and ns.Moment()
+	local memo = now ~= nil and moment ~= nil and questID ~= nil
+	if memo then
+		if now ~= objAt or moment ~= objMoment then
+			for q in pairs(objMemo) do objMemo[q] = nil end
+			objAt, objMoment = now, moment
+		end
+		local hit = objMemo[questID]
+		if hit ~= nil then return hit or nil end
+		objMemo[questID] = false
+	end
 	local raw = C_QuestLog.GetQuestObjectives(questID)
 	if type(raw) ~= "table" or #raw == 0 then return nil end
 	local out = {}
@@ -334,9 +447,16 @@ function Compat.GetQuestObjectives(questID)
 		if req <= 0 then
 			-- Event objectives report 0/0; finished is the truth.
 			req, cur = 1, finished and 1 or 0
+		elseif cur >= req and not finished then
+			-- A skill objective ("Raise your alchemy skill to 20", Camping 101,
+			-- #1952) counts past its 1 while unfinished; finished is the truth.
+			cur = req - 1
 		end
-		out[i] = { text = o.text or "", type = o.type or "", finished = finished, numFulfilled = cur, numRequired = req }
+		local text = o.text or ""
+		if Compat.Placeholder(Compat.ObjectiveLabel(text)) then text = "" end
+		out[i] = { text = text, type = o.type or "", finished = finished, numFulfilled = cur, numRequired = req }
 	end
+	if memo then objMemo[questID] = out end
 	return out
 end
 
@@ -344,10 +464,14 @@ end
 -- ("Kobold Vermin slain: 3/10", "Linen Cloth: 2/6", on some clients "3/10
 -- Kobold Vermin slain"), the name an objective is matched on (the guide's
 -- objective goals, Engine; the quest tracker's lines). A line of counts alone
--- (" slain: 0/8", ": 0/1") has no name yet: "".
+-- (" slain: 0/8", ": 0/1") has no name yet: "". The frFR client writes kill
+-- lines "%s : %d/%d |4personnage tué:personnages tués;" (a grammar escape the
+-- log resolves by the count; the space before the colon at times a no-break
+-- one): the escape is not part of the name, the no-break space is a space.
 function Compat.ObjectiveLabel(text)
 	if type(text) ~= "string" then return "" end
-	local s = text:gsub("^%s*%d+%s*/%s*%d+%s+", ""):gsub("%s*:%s*%d+%s*/%s*%d+%s*$", "")
+	local s = text:gsub("|4[^|;]*;", ""):gsub("\194\160", " ")
+	s = s:gsub("^%s*%d+%s*/%s*%d+%s+", ""):gsub("%s*:%s*%d+%s*/%s*%d+%s*$", "")
 	s = s:gsub("^%s+", ""):gsub("%s+$", "")
 	if s == "slain" then return "" end
 	return (s:gsub("%s+slain$", ""))
@@ -369,6 +493,85 @@ function Compat.GetLogQuests()
 		local info = QL.GetInfo(i)
 		local q = info and not info.isHeader and not info.isHidden and Compat.Readable(info.questID)
 		if type(q) == "number" and q > 0 then out[#out + 1] = q end
+	end
+	return out
+end
+
+-- Whether a quest in the log runs its timer now: one with time allowed
+-- (C_QuestLog.GetTimeAllowed, the quest log's clock; the old GetQuestTimers
+-- where the client has it) that is neither ready to hand in nor failed.
+-- Nil-safe on any client; no tables of its own (the client's GetInfo makes
+-- one per entry). The walk over the log is kept until the quest log changes
+-- (logTimer): a timer starts with an accept and stops with a hand-in, a
+-- failure, its objectives done or an abandon, and the client says each of
+-- those with QUEST_LOG_UPDATE; While-here's poll asks every 0.5 s and the
+-- travel planner on every plan. The old timer list is read live.
+local logTimer -- the walk's answer since the last quest-log change (nil: walk again)
+function Compat.QuestTimerRunning()
+	if GetQuestTimers and GetQuestTimers() then return true end
+	if logTimer ~= nil then return logTimer end
+	local QL = C_QuestLog
+	if not (QL and QL.GetTimeAllowed and QL.GetNumQuestLogEntries and QL.GetInfo) then return false end
+	logTimer = false
+	for i = 1, QL.GetNumQuestLogEntries() or 0 do
+		local info = QL.GetInfo(i)
+		local q = info and not info.isHeader and info.questID
+		if type(q) == "number" and q > 0 then
+			local ok, total = pcall(QL.GetTimeAllowed, q)
+			if ok and type(total) == "number" and total > 0 and not Compat.IsQuestReadyForTurnIn(q)
+				and not (QL.IsFailed and QL.IsFailed(q)) then
+				logTimer = true
+				break
+			end
+		end
+	end
+	return logTimer
+end
+if ns.RegisterEvent then
+	local function logChanged() logTimer = nil end
+	for _, event in ipairs({ "QUEST_LOG_UPDATE", "QUEST_ACCEPTED", "QUEST_REMOVED", "QUEST_TURNED_IN", "UNIT_QUEST_LOG_CHANGED", "PLAYER_ENTERING_WORLD" }) do
+		ns.RegisterEvent(event, logChanged)
+	end
+end
+
+-- The timers running in the quest log: out[questID] = seconds left, for each
+-- quest whose clock runs and has not failed, whether or not its objectives
+-- are done (the hand-in is timed too). The old GetQuestTimers (seconds left,
+-- one per timer; GetQuestIndexForTimer names its log entry) where the client
+-- has it, else C_QuestLog.GetTimeAllowed's total less its elapsed (Forever's
+-- client: #1327). Fills and returns `out` (a new table when nil), wiped
+-- first. Nil-safe on any client.
+function Compat.QuestTimers(out)
+	out = out or {}
+	for q in pairs(out) do out[q] = nil end
+	local QL = C_QuestLog
+	if not (QL and QL.GetNumQuestLogEntries and QL.GetInfo) then return out end
+	if GetQuestTimers and GetQuestIndexForTimer then
+		for i = 1, select("#", GetQuestTimers()) do
+			local left = select(i, GetQuestTimers())
+			local index = GetQuestIndexForTimer(i)
+			local info = index and QL.GetInfo(index)
+			local q = info and info.questID
+			if type(q) == "number" and q > 0 and type(left) == "number" then out[q] = left > 0 and left or 0 end
+		end
+	end
+	if QL.GetTimeAllowed then
+		for i = 1, QL.GetNumQuestLogEntries() or 0 do
+			local info = QL.GetInfo(i)
+			local q = info and not info.isHeader and info.questID
+			if type(q) == "number" and q > 0 and out[q] == nil then
+				local ok, total, elapsed = pcall(QL.GetTimeAllowed, q)
+				if ok and type(total) == "number" and total > 0 then
+					local left = total - (type(elapsed) == "number" and elapsed or 0)
+					out[q] = left > 0 and left or 0
+				end
+			end
+		end
+	end
+	if QL.IsFailed then
+		for q in pairs(out) do
+			if QL.IsFailed(q) then out[q] = nil end
+		end
 	end
 	return out
 end
@@ -464,6 +667,23 @@ function Compat.GetActiveQuests(source)
 	return out
 end
 
+-- Whether the open gossip window has an option that is no service: neither
+-- the goods (VendorGossipIcon, fileID 132060), training (TrainerGossipIcon,
+-- 132058), the inn's bind (BinderGossipIcon, 132052) nor the flight map
+-- (TaxiGossipIcon, 132057), told by the option's icon, never its text. Such
+-- a chat option can lead to a quest the window's list leaves out: Sovik
+-- gives Chief Engineer Scooty only from his (#1762). False when the client
+-- cannot say.
+local SERVICE_ICONS = { [132060] = true, [132058] = true, [132052] = true, [132057] = true }
+function Compat.GossipHasChat()
+	local G = C_GossipInfo
+	if not (G and G.GetOptions) then return false end
+	for _, o in ipairs(G.GetOptions() or {}) do
+		if not SERVICE_ICONS[o.overrideIconID or o.icon] then return true end
+	end
+	return false
+end
+
 -- Classic grey level (no XP from quests at or below it), used when the
 -- client gives no trivial range.
 local function greyLevel(level)
@@ -493,11 +713,56 @@ function Compat.GetQuestLevel(questID)
 	return type(level) == "number" and level > 0 and level or nil
 end
 
+-- The count of each item in one container (bag id), read through
+-- C_Container; an empty table where the client has no such container or API.
+local function containerCounts(bag, into)
+	local C = C_Container
+	if not (C and C.GetContainerNumSlots and (C.GetContainerItemID or C.GetContainerItemInfo)) then return into end
+	local ok, slots = pcall(C.GetContainerNumSlots, bag)
+	if not ok or type(slots) ~= "number" then return into end
+	for slot = 1, slots do
+		local info = C.GetContainerItemInfo and C.GetContainerItemInfo(bag, slot)
+		local id = type(info) == "table" and info.itemID or (C.GetContainerItemID and C.GetContainerItemID(bag, slot))
+		if type(id) == "number" then
+			local n = type(info) == "table" and tonumber(info.stackCount) or 1
+			into[id] = (into[id] or 0) + n
+		end
+	end
+	return into
+end
+
+-- The keyring's items (KEYRING_CONTAINER, bag -2): quest keys go there on
+-- their own when looted (the Durnholde jailors' keys, #2512). Read once per
+-- moment (ns.Moment, as GetQuestObjectives).
+local KEYRING = KEYRING_CONTAINER or -2
+local keyring, keyringAt, keyringMoment, bagScratch = {}, nil, nil, {}
+local function keyringCounts()
+	local now, moment = GetTime and GetTime(), ns.Moment and ns.Moment()
+	if now == nil or moment == nil or now ~= keyringAt or moment ~= keyringMoment then
+		for id in pairs(keyring) do keyring[id] = nil end
+		containerCounts(KEYRING, keyring)
+		keyringAt, keyringMoment = now, moment
+	end
+	return keyring
+end
+
 -- includeBank: the bank's too (a key left there still counts as owned).
+-- An item on the keyring counts as in the bags: clients differ on whether
+-- GetItemCount counts the keyring, so when the keyring holds the item, the
+-- bags' own slots are read too and the keyring's count is added only when
+-- GetItemCount left it out (never counted twice).
 function Compat.GetItemCount(itemID, includeBank)
 	local fn = (C_Item and C_Item.GetItemCount) or GetItemCount
 	if not fn then return 0 end
-	return fn(itemID, includeBank and true or nil) or 0
+	local n = fn(itemID, includeBank and true or nil) or 0
+	local keys = keyringCounts()[itemID]
+	if not keys then return n end
+	local bags = bagScratch
+	for id in pairs(bags) do bags[id] = nil end
+	for bag = 0, NUM_BAG_SLOTS or 4 do containerCounts(bag, bags) end
+	local inBags = includeBank and (fn(itemID) or 0) or n
+	if inBags >= (bags[itemID] or 0) + keys then return n end
+	return n + keys
 end
 
 -- Whether an item does something when used (it has a spell): Tharnariun's
@@ -506,6 +771,15 @@ function Compat.ItemUsable(itemID)
 	local fn = (C_Item and C_Item.GetItemSpell) or GetItemSpell
 	if not fn then return true end
 	return fn(itemID) ~= nil
+end
+
+-- The spell an item casts when used (the Filled Cleansing Bowl's summon),
+-- matched against UNIT_SPELLCAST_SUCCEEDED; nil where the client cannot tell.
+function Compat.GetItemSpellID(itemID)
+	local fn = (C_Item and C_Item.GetItemSpell) or GetItemSpell
+	if not fn then return nil end
+	local _, spell = fn(itemID)
+	return readable(spell)
 end
 
 -- The client's quality for an item (0 poor .. 7 heirloom), or nil while the
@@ -539,7 +813,7 @@ function Compat.ItemTipColor(itemID)
 	local line = ok and type(data) == "table" and type(data.lines) == "table" and data.lines[1]
 	if type(line) ~= "table" then return nil end
 	local text, c = line.leftText, line.leftColor
-	if type(text) ~= "string" or text == "" or isSecret(text) or text == RETRIEVING_ITEM_INFO then return nil end
+	if type(text) ~= "string" or isSecret(text) or text == "" or text == RETRIEVING_ITEM_INFO then return nil end
 	if type(c) ~= "table" or type(c.r) ~= "number" or isSecret(c.r) then return nil end
 	itemTipColors[itemID] = { c.r, c.g, c.b }
 	return c.r, c.g, c.b
@@ -582,6 +856,27 @@ function Compat.ItemLink(itemID)
 	return nil
 end
 
+-- An item's class and subclass (C_Item.GetItemInfoInstant: the client knows
+-- them without the item being cached), or nil when it does not know the item.
+function Compat.ItemKind(itemID)
+	local fn = type(itemID) == "number" and C_Item and C_Item.GetItemInfoInstant
+	if not fn then return nil end
+	local ok, id, _, _, _, _, classID, subclassID = pcall(fn, itemID)
+	if not (ok and id) then return nil end
+	return classID, subclassID
+end
+
+-- How an item binds (C_Item.GetItemInfo's bindType: 0 not at all, 1 when
+-- picked up, 2 when equipped, 3 when used, 4 as a quest item), or nil while
+-- the item is not cached (RequestItem asks for it).
+function Compat.ItemBinding(itemID)
+	local fn = type(itemID) == "number" and ((C_Item and C_Item.GetItemInfo) or GetItemInfo)
+	if not fn then return nil end
+	local ok, name, _, _, _, _, _, _, _, _, _, _, _, _, bind = pcall(fn, itemID)
+	if not (ok and name) then return nil end
+	return tonumber(bind) or 0
+end
+
 -- true when the item is in the client's cache; otherwise asks the server for
 -- it (GET_ITEM_INFO_RECEIVED fires with the item ID when it arrives) and
 -- returns false.
@@ -602,7 +897,7 @@ function Compat.GetItemName(itemID)
 	local fn = type(itemID) == "number" and C_Item and C_Item.GetItemNameByID
 	if not fn then return nil end
 	local ok, name = pcall(fn, itemID)
-	if ok and type(name) == "string" and name ~= "" and not isSecret(name) then return name end
+	if ok and type(name) == "string" and not isSecret(name) and name ~= "" then return name end
 	return nil
 end
 
@@ -635,6 +930,26 @@ function Compat.RequestSpell(spellID)
 	return false
 end
 
+-- Whether the client has a creature in its cache, which PlayerModel's
+-- SetCreature draws from (an uncached one draws nothing): true when the
+-- tooltip of its unit link names it; false otherwise, and asking for that
+-- tooltip has the client ask the server (no event follows the answer: ask
+-- again later). nil when the client cannot tell (no C_TooltipInfo). Kept
+-- for the session once true.
+local creaturesCached = {}
+function Compat.CreatureCached(npcID)
+	if type(npcID) ~= "number" then return false end
+	if creaturesCached[npcID] then return true end
+	local get = C_TooltipInfo and C_TooltipInfo.GetHyperlink
+	if not get then return nil end
+	local ok, data = pcall(get, ("unit:Creature-0-0-0-0-%d-0000000000"):format(npcID))
+	local line = ok and type(data) == "table" and type(data.lines) == "table" and data.lines[1]
+	local text = type(line) == "table" and line.leftText
+	if type(text) ~= "string" or isSecret(text) or text == "" or text == UNKNOWNOBJECT or text == RETRIEVING_DATA then return false end
+	creaturesCached[npcID] = true
+	return true
+end
+
 ---------------------------------------------------------------------------
 -- Maps and world coordinates
 ---------------------------------------------------------------------------
@@ -661,7 +976,7 @@ function Compat.MapName(uiMapID)
 	if not uiMapID then return nil end
 	local C = ns.Compat
 	local ok, name = pcall(C.GetMapName, uiMapID)
-	if ok and type(name) == "string" and name ~= "" and not isSecret(name) then return name end
+	if ok and type(name) == "string" and not isSecret(name) and name ~= "" then return name end
 	local X = ns.Codex
 	local z = X and X.IsLoaded and X.IsLoaded() and X.Zone and X.Zone(uiMapID)
 	return z and z.name or nil
@@ -693,6 +1008,28 @@ function Compat.OpenWorldMap(uiMapID)
 	return pcall(open, uiMapID) and true or false
 end
 
+-- Opening the quest log at a quest: the client's QuestMapFrame_OpenToQuestDetails
+-- (Blizzard_UIPanels_Game/Mainline/QuestMapFrame.lua, which Forever's client
+-- loads; its own objective tracker opens a quest with it): the map with its
+-- quest log, that quest's details shown. It opens the world map, so under the
+-- same rules as Compat.OpenWorldMap: never in combat, never with the gamepad
+-- interface. Callers check the quest is in the log (Compat.IsOnQuest).
+--   Compat.CanOpenQuestLog() -> bool ; Compat.OpenQuestLog(questID) -> opened
+local function questLogOpener()
+	if ns.GamepadUI() then return nil end
+	return QuestMapFrame_OpenToQuestDetails
+end
+
+function Compat.CanOpenQuestLog()
+	return questLogOpener() ~= nil
+end
+
+function Compat.OpenQuestLog(questID)
+	local open = questLogOpener()
+	if not open or type(questID) ~= "number" or Compat.InCombat() then return false end
+	return pcall(open, questID) and true or false
+end
+
 -- The continent-type uiMap (Enum.UIMapType.Continent = 2) a map belongs to,
 -- found through C_Map.GetMapInfo's parentMapID chain; nil when unknown.
 -- Works for maps with no world bounds (no registered Era frame).
@@ -718,27 +1055,31 @@ function Compat.GetContinentMap(uiMapID)
 	return result or nil
 end
 
-function Compat.GetPlayerMapPosition()
+-- A unit's position on its best map (map, x and y in 0-100); nil where the
+-- client does not say or keeps the map or the position secret (#2533: the
+-- percent was worked out on a secret value, which the client blocks and logs
+-- as Polestar's taint).
+local function mapPosition(unit)
 	if not (C_Map and C_Map.GetBestMapForUnit and C_Map.GetPlayerMapPosition) then return nil end
-	local map = C_Map.GetBestMapForUnit("player")
+	local map = readable(C_Map.GetBestMapForUnit(unit))
 	if not map then return nil end
-	local pos = C_Map.GetPlayerMapPosition(map, "player")
+	local pos = C_Map.GetPlayerMapPosition(map, unit)
+	if isSecret(pos) then return nil end
 	local x, y = xyOf(pos)
-	if not x or not y or (x == 0 and y == 0) then return nil end
+	x, y = readable(x), readable(y)
+	if type(x) ~= "number" or type(y) ~= "number" or (x == 0 and y == 0) then return nil end
 	return map, x * 100, y * 100
+end
+
+function Compat.GetPlayerMapPosition()
+	return mapPosition("player")
 end
 
 -- Where a party unit stands on its best map, as GetPlayerMapPosition gives
 -- it (map, x and y in 0-100); nil where the client does not say (an
 -- instance, a member out of the world, a client without party positions).
 function Compat.GetUnitMapPosition(unit)
-	if not (C_Map and C_Map.GetBestMapForUnit and C_Map.GetPlayerMapPosition) then return nil end
-	local map = C_Map.GetBestMapForUnit(unit)
-	if not map then return nil end
-	local pos = C_Map.GetPlayerMapPosition(map, unit)
-	local x, y = xyOf(pos)
-	if not x or not y or (x == 0 and y == 0) then return nil end
-	return map, x * 100, y * 100
+	return mapPosition(unit)
 end
 
 -- The zone (Enum.UIMapType.Zone = 3) a unit is in: its best map, climbed
@@ -845,6 +1186,8 @@ local SKILL_LINES = {
 }
 Compat.SKILL_LINES = SKILL_LINES
 
+local AURA_FILTERS = { "HELPFUL", "HARMFUL" }
+
 function Compat.Supports(feature)
 	if feature == "skill" then
 		return (C_SkillInfo and (C_SkillInfo.GetSkillLineInfoByID or C_SkillInfo.GetSkillLineInfo)
@@ -858,8 +1201,42 @@ function Compat.Supports(feature)
 		return (C_MapExplorationInfo and C_MapExplorationInfo.GetExploredAreaIDsAtPosition) and true or false
 	elseif feature == "achievement" then
 		return GetAchievementInfo and true or false
+	elseif feature == "aura" then
+		return ((C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID) or UnitAura) and true or false
+	elseif feature == "equipment" then
+		return ((C_Item and C_Item.IsEquippedItem) or IsEquippedItem) and true or false
 	end
 	return false
+end
+
+-- Whether the player has the aura of that spell (a buff or a debuff), by spell id;
+-- nil when the client will not say (the call is refused: QoL/Rest.lua reads its aura the same way).
+function Compat.PlayerHasAura(spellID)
+	if not spellID then return false end
+	if C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
+		local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, spellID)
+		if not ok then return nil end
+		return type(aura) == "table"
+	end
+	if UnitAura then
+		for _, filter in ipairs(AURA_FILTERS) do
+			for i = 1, 255 do
+				local name, _, _, _, _, _, _, _, _, id = UnitAura("player", i, filter)
+				if not name then break end
+				if id == spellID then return true end
+			end
+		end
+	end
+	return false
+end
+
+-- Whether the player wears the item; nil when the client cannot say.
+function Compat.IsItemEquipped(itemID)
+	local fn = (C_Item and C_Item.IsEquippedItem) or IsEquippedItem
+	if not (fn and itemID) then return nil end
+	local ok, worn = pcall(fn, itemID)
+	if not ok then return nil end
+	return worn and true or false
 end
 
 local function learnedRank(info)

@@ -6,7 +6,7 @@ ns.ui = U
 
 local KIND = { accept = "Accept", ["do"] = "Do", turnin = "Turn in", train = "Train", bind = "Hearth", discover = "Flight path",
                buyweapon = "Buy", craft = "Craft", learn = "Learn", learnweapon = "Weapon skill", buyammo = "Ammo", visit = "Visit", run = "Dungeon", grind = "Grind", done = "Done" }
-local frame, title, stepText, distText, nextText, listen, skip
+local frame, title, stepText, distText, nextText, listen, skip, toLive
 
 -- one spawn the whole server shares (cw, from manual_overrides "contested"): the warning, and whether Skip drops only
 -- that quest (a pick-up, or a step that's only that quest's work) or a whole step done together
@@ -169,6 +169,15 @@ function U.create()
   routes:SetHeight(18)
   routes:SetPoint("TOPRIGHT", -6, -6)
   tip(routes, "Pick your next route: the planned ones, with how long each takes")
+  -- only while the window shows another step than the one you're on (Back, or a jump back or ahead)
+  toLive = button(frame, "Current", 62, function() ns.core.toLive() end)
+  toLive:SetHeight(18)
+  toLive:SetPoint("RIGHT", routes, "LEFT", -4, 0)
+  tip(toLive, "Back to the step you're on: the window is showing another one")
+  toLive:Hide()
+  U.toLive = toLive   -- (the smoke test)
+  -- Target, left of these: the step's quest mobs (QuestTarget.lua)
+  if ns.questTarget then ns.questTarget.hook(frame) end
 
   -- the distance, twice a second (the arrow has its own window: Arrow.lua)
   local acc = 0
@@ -396,6 +405,10 @@ function U.refresh()
   local step, i, pos, total, via = ns.core.current()
   local r = ns.core.route()
   local rowsShown
+  local off = r and ns.core.offLive() and true or false
+  toLive:SetShown(off)
+  local aim = ns.questTarget and ns.questTarget.update(off)
+  title:SetPoint("RIGHT", (off and -136 or -70) - (aim and 60 or 0), 0)
   if not r then
     title:SetText("AuDHD")
     lightSkip(false)

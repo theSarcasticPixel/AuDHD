@@ -182,7 +182,8 @@ end
 -- ------------------------------------------------------------------ near a rare's spawn point
 -- : every rare's spawn points (RareData.lua). One pop-up per rare as you come within NEAR yards of one of its spawn
 -- points; it can pop up again once you've been REARM yards from all of them. Rares far below your level (GREY levels)
--- only when the route needs them.
+-- only when the route needs them. None on a flight: only a rare actually seen (above) alerts then; one near where you
+-- land pops up once you're off.
 local NEAR, REARM, GREY = 100, 500, 8
 local where      -- npc -> { { c, x, y } } its spawn points in world coordinates (worked out once)
 local armed = {} -- npc -> false after its pop-up, until you're REARM yards away
@@ -227,6 +228,7 @@ end
 
 function R.checkSpawns()
   if mode() == "off" or not ns.rareData then return end
+  if UnitOnTaxi and UnitOnTaxi("player") then R.buttonTick() return end
   local me = ns.core.playerWorld()
   if not me then return end
   local level = UnitLevel("player") or 1
@@ -257,7 +259,7 @@ end
 -- which closes it in combat too (a secure snippet hides it and drops the wheel's bindings).
 -- Several near: each click targets one and
 -- moves on to the next (not in combat: the button can't change then). Drag to move.
-local button, wheel, wheelToggle, closer
+local button, wheel, wheelToggle, keysToggle, closer
 -- the rares near you, in the order found: { npc, name, at }; the button targets list[idx], and each click moves it on
 -- to the next
 local list, idx, dirty = {}, 1, false
@@ -277,6 +279,56 @@ end
 -- (override bindings, owned by the x: its secure snippet clears them, in combat too; the wheel zooms again once it's
 -- gone). Otherwise bindings can't change in combat: then after it.
 local function wheelOn() return AuDHDDB.rareWheel and #list > 0 end
+-- the action bar keys: while the button shows, each key bound to an action bar slot clicks an unseen secure button of
+-- ours instead, whose macro is "/tar <rare>" then "/click" that slot's own button, so the spell still goes off, as if
+-- every spell had /tar in front of it. Blizzard's action buttons are never touched (only clicked, as a macro would).
+-- The keys come from the game's bindings at the time; bar addons with their own buttons aren't covered
+local KEYBARS = {
+  { "ACTIONBUTTON", "ActionButton" }, { "MULTIACTIONBAR1BUTTON", "MultiBarBottomLeftButton" },
+  { "MULTIACTIONBAR2BUTTON", "MultiBarBottomRightButton" }, { "MULTIACTIONBAR3BUTTON", "MultiBarRightButton" },
+  { "MULTIACTIONBAR4BUTTON", "MultiBarLeftButton" }, { "MULTIACTIONBAR5BUTTON", "MultiBar5Button" },
+  { "MULTIACTIONBAR6BUTTON", "MultiBar6Button" }, { "MULTIACTIONBAR7BUTTON", "MultiBar7Button" },
+}
+local keyButtons = {}   -- an action button's name -> our button that targets, then clicks it
+local function keysOn() return AuDHDDB.rareKeys and #list > 0 end
+local function keyButton(target)
+  local b = keyButtons[target]
+  if b then return b end
+  b = ns.newFrame("Rare", "Button", "AuDHDRareKey" .. target, UIParent, "SecureActionButtonTemplate")
+  b:SetSize(1, 1)
+  b:SetPoint("TOPLEFT", UIParent, "TOPLEFT", -10, 10)
+  b:SetAlpha(0)
+  b:EnableMouse(false)
+  b:RegisterForClicks("AnyUp", "AnyDown")
+  b:SetAttribute("type", "macro")
+  keyButtons[target] = b
+  return b
+end
+-- { key, our button's name } for each key bound to an action bar slot whose button is there
+function R.actionKeys()
+  local out = {}
+  if not GetBindingKey then return out end
+  for _, bar in ipairs(KEYBARS) do
+    for i = 1, 12 do
+      local target = bar[2] .. i
+      if _G[target] then
+        for _, key in ipairs({ GetBindingKey(bar[1] .. i) }) do out[#out + 1] = { key, target } end
+      end
+    end
+  end
+  return out
+end
+local function lit(toggle, on)
+  if not toggle then return end
+  local label = toggle:GetFontString()
+  if on then
+    toggle:LockHighlight()
+    if label then label:SetTextColor(0.25, 1, 0.25) end
+  else
+    toggle:UnlockHighlight()
+    if label then label:SetTextColor(1, 0.82, 0) end
+  end
+end
 function R.applyWheel()
   if not wheel then return end
   if InCombatLockdown() then dirty = true return end
@@ -286,17 +338,19 @@ function R.applyWheel()
       SetOverrideBindingClick(closer, true, "MOUSEWHEELUP", "AuDHDRareWheel")
       SetOverrideBindingClick(closer, true, "MOUSEWHEELDOWN", "AuDHDRareWheel")
     end
-  end
-  if wheelToggle then
-    local label = wheelToggle:GetFontString()
-    if AuDHDDB.rareWheel then
-      wheelToggle:LockHighlight()
-      if label then label:SetTextColor(0.25, 1, 0.25) end
-    else
-      wheelToggle:UnlockHighlight()
-      if label then label:SetTextColor(1, 0.82, 0) end
+    if keysOn() then
+      -- the slot's button acts on the press the game's "cast on key down" setting picks: /click sends that press
+      local onDown = GetCVarBool and GetCVarBool("ActionButtonUseKeyDown")
+      local name = list[idx] and list[idx].name
+      for _, kt in ipairs(R.actionKeys()) do
+        local b = keyButton(kt[2])
+        b:SetAttribute("macrotext", ("/tar %s\n/click %s LeftButton %s"):format(name, kt[2], onDown and "true" or "false"))
+        SetOverrideBindingClick(closer, true, kt[1], "AuDHDRareKey" .. kt[2])
+      end
     end
   end
+  lit(wheelToggle, AuDHDDB.rareWheel)
+  lit(keysToggle, AuDHDDB.rareKeys)
 end
 
 local function makeButton()
@@ -341,7 +395,7 @@ local function makeButton()
   button.model:Hide()
   button.text = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   button.text:SetPoint("LEFT", button.face, "RIGHT", 8, 0)
-  button.text:SetPoint("RIGHT", -92, 0)
+  button.text:SetPoint("RIGHT", -152, 0)
   button.text:SetJustifyH("LEFT")
   button.text:SetWordWrap(false)
   -- feel like a button: lit on hover, pressed in while held, a click sound, and under it whether the click found the
@@ -391,10 +445,32 @@ local function makeButton()
     GameTooltip:Show()
   end)
   wheelToggle:SetScript("OnLeave", function() GameTooltip:Hide() end)
+  -- the keys toggle: on (lit, green) each action bar key targets the rare, then does its own spell
+  keysToggle = ns.newFrame("Rare", "Button", nil, button, "UIPanelButtonTemplate")
+  keysToggle:SetSize(54, 24)
+  keysToggle:SetPoint("RIGHT", wheelToggle, "LEFT", -4, 0)
+  keysToggle:SetText("Keys")
+  keysToggle:SetScript("OnClick", function()
+    AuDHDDB.rareKeys = not AuDHDDB.rareKeys or nil
+    PlaySound(SOUNDKIT and SOUNDKIT.IG_MAINMENU_OPTION_CHECKBOX_ON or 856)
+    local msg = AuDHDDB.rareKeys and "|cff40ff40Your action bar keys target it too|r" or "|cffffd100Your keys only cast again|r"
+    if InCombatLockdown() then msg = msg .. " |cffaaaaaa(after this fight)|r" end
+    button.status:SetText(msg)
+    R.applyWheel()
+  end)
+  keysToggle:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+    GameTooltip:AddLine("Action bar keys target it", 1, 1, 1)
+    GameTooltip:AddLine(AuDHDDB.rareKeys and "On: each key on your action bars targets the rare, then does its own spell, while this button shows. Click to turn off."
+      or "Off: click to make each key on your action bars target the rare first, then do its own spell, while this button shows.", 0.8, 0.8, 0.8, true)
+    GameTooltip:Show()
+  end)
+  keysToggle:SetScript("OnLeave", function() GameTooltip:Hide() end)
   button:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
     GameTooltip:AddLine("Click: /tar " .. (self.name or ""), 1, 1, 1)
     if AuDHDDB.rareWheel then GameTooltip:AddLine("Mouse wheel: the same", 0.25, 1, 0.25) end
+    if AuDHDDB.rareKeys then GameTooltip:AddLine("Action bar keys: the same, then their spell", 0.25, 1, 0.25) end
     if #list > 1 then GameTooltip:AddLine(("%d rares near: each click targets the next"):format(#list), 0.6, 0.8, 1) end
     GameTooltip:AddLine("Drag to move", 0.6, 0.6, 0.6)
     GameTooltip:Show()

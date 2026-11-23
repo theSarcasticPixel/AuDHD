@@ -20,7 +20,7 @@
 ## Title-zhTW: AuDHDEngine 任務資料庫
 ## Notes-zhTW: Polestar 任務標記與滑鼠提示所用的任務、NPC、物件與物品資料。按需載入。
 ## Author: Polestar
-## Version: 0.3.4
+## Version: 0.4.1.1
 ## Category: AuDHDEngine
 ## Group: AuDHDEngine
 ## LoadOnDemand: 1

@@ -1,5 +1,6 @@
 -- One-click fishing: with a fishing pole in your hands, one click of your fishing mouse button (settings: right,
--- middle, button 4 or 5) on the world casts Fishing; while your line is out the same click reels it in (the game's
+-- middle, button 4 or 5, or the space bar, which then doesn't jump while the pole is in your hands) on the world casts
+-- Fishing; while your line is out the same click reels it in (the game's
 -- "interact with target" on the bobber) and the catch is looted. One click, not a double click: easier on the hands. A
 -- key for it can be set in the game's Key Bindings (AuDHD: Fish): the same key casts, then reels in.
 -- Addons can't cast on their own: the button is bound to a hidden secure button running /cast. The right button is only
@@ -14,11 +15,11 @@ _G["BINDING_NAME_CLICK AuDHDFishCast:LeftButton"] = "Fish (cast, then reel in)"
 local FISHING = 7620           -- Fishing (every rank has the same name)
 local QUICK = 0.3              -- seconds: a press longer than this is the camera, not a cast
 local MOVE = 12                -- pixels the cursor may move during a click
-F.BUTTONS = { { "BUTTON2", "Right button" }, { "BUTTON3", "Middle button" }, { "BUTTON4", "Button 4" }, { "BUTTON5", "Button 5" } }
+F.BUTTONS = { { "BUTTON2", "Right button" }, { "BUTTON3", "Middle button" }, { "BUTTON4", "Button 4" }, { "BUTTON5", "Button 5" },
+  { "SPACE", "Space bar" } }
 
 local castButton, owner, watcher, ticker
 local down, fishingNow, lookStarted, bound
-local restore                  -- CVars changed while fishing, to put back
 
 local function log(e, t) if ns.log then ns.log.add(e, t) end end
 local function isOn() return not AuDHDDB.fishOff end
@@ -98,20 +99,23 @@ local function bind()
   end
 end
 
--- soft targeting on, so "interact with target" finds the bobber; put back when you put the pole away
+-- soft targeting on only while the line is out, so "interact with target" finds the bobber and nothing else. The
+-- game saves the setting, so the old value is kept in ours (AuDHDDB.fishSoftTarget) and put back when the line comes
+-- in, as combat starts, at logout and at the next login (after a crash)
 local function softTarget(on)
   if not SetCVar or not GetCVar then return end
   if on then
-    if restore then return end
+    if AuDHDDB.fishSoftTarget then return end
     local old = GetCVar("SoftTargetInteract")
     if old == nil or tonumber(old) == 3 then return end
-    restore = { SoftTargetInteract = old }
+    AuDHDDB.fishSoftTarget = old
     pcall(SetCVar, "SoftTargetInteract", "3")
-  elseif restore and not InCombatLockdown() then
-    for k, v in pairs(restore) do pcall(SetCVar, k, v) end
-    restore = nil
+  elseif AuDHDDB.fishSoftTarget and not InCombatLockdown() then
+    pcall(SetCVar, "SoftTargetInteract", AuDHDDB.fishSoftTarget)
+    AuDHDDB.fishSoftTarget = nil
   end
 end
+F.softTarget = softTarget
 
 -- the splash louder while a pole is in your hands: sound effects up to the splash volume (the settings' slider, 100% by
 -- default), music and the
@@ -191,6 +195,8 @@ local function count(id)
   if C_Item and C_Item.GetItemCount then return C_Item.GetItemCount(id) or 0 end
   return GetItemCount and GetItemCount(id) or 0
 end
+-- one you can use: not above your level (FishGear's check)
+local function usable(id) return not (ns.fishGear and ns.fishGear.canUse) or ns.fishGear.canUse(id) end
 -- the lure to put on now: none when the pole has one, or none is in your bags
 local function lureToUse()
   if AuDHDDB.fishLureOff or not GetWeaponEnchantInfo then return nil end
@@ -198,11 +204,11 @@ local function lureToUse()
   local rank = skill()
   if not rank then
     -- the skill can't be read: the lure that needs the least (the game says no if it's too much)
-    for i = #LURES, 1, -1 do if count(LURES[i][1]) > 0 then return LURES[i][1] end end
+    for i = #LURES, 1, -1 do if count(LURES[i][1]) > 0 and usable(LURES[i][1]) then return LURES[i][1] end end
     return nil
   end
   for _, l in ipairs(LURES) do
-    if rank >= l[3] and count(l[1]) > 0 then return l[1] end
+    if rank >= l[3] and count(l[1]) > 0 and usable(l[1]) then return l[1] end
   end
 end
 
@@ -306,7 +312,8 @@ local function watch()
   for _, e in ipairs({ "GLOBAL_MOUSE_DOWN", "GLOBAL_MOUSE_UP", "UPDATE_MOUSEOVER_UNIT" }) do
     if want then watcher:RegisterEvent(e) else watcher:UnregisterEvent(e) end
   end
-  if want then setMacro() softTarget(true) else softTarget(false) fishingNow = nil end
+  if want then setMacro() else fishingNow = nil end
+  softTarget(want and fishingNow)
   -- the right button: re-checked as the cursor moves over things (objects don't send an event)
   if want and mouseKey() == "BUTTON2" then
     if not ticker then ticker = C_Timer.NewTicker(0.1, bind) end
@@ -336,15 +343,15 @@ watcher:SetScript("OnEvent", function(_, e, a, b, c)
   if e == "ZONE_CHANGED_NEW_AREA" or e == "ZONE_CHANGED" or e == "ZONE_CHANGED_INDOORS" or e == "SKILL_LINES_CHANGED" then
     return showLevels()
   end
-  if e == "PLAYER_LOGIN" then loud(false) make() showLevels() return watch() end   -- (put back what a crash left loud)
-  if e == "PLAYER_LOGOUT" then return loud(false) end
+  if e == "PLAYER_LOGIN" then loud(false) softTarget(false) make() showLevels() return watch() end   -- (put back what a crash left)
+  if e == "PLAYER_LOGOUT" then loud(false) return softTarget(false) end
   if not owner then return end
   if e == "UNIT_SPELLCAST_CHANNEL_START" then
-    if isFishingCast(a, c) then fishingNow = true bind() log("FISH_CAST", {}) end
+    if isFishingCast(a, c) then fishingNow = true softTarget(true) bind() log("FISH_CAST", {}) end
     return
   end
   if e == "UNIT_SPELLCAST_CHANNEL_STOP" then
-    if fishingNow and isFishingCast(a, c) then fishingNow = nil bind() end
+    if fishingNow and isFishingCast(a, c) then fishingNow = nil softTarget(false) bind() end
     return
   end
   if e == "LOOT_READY" then
@@ -354,7 +361,7 @@ watcher:SetScript("OnEvent", function(_, e, a, b, c)
     end
     return
   end
-  if e == "PLAYER_REGEN_DISABLED" then fishingNow, bound, down = nil, nil, nil releaseLook() return end   -- (the secure handler cleared them)
+  if e == "PLAYER_REGEN_DISABLED" then fishingNow, bound, down = nil, nil, nil releaseLook() softTarget(false) return end   -- (the secure handler cleared them)
   watch()
 end)
 
@@ -523,7 +530,7 @@ function F.command(arg)
     return "louder splash with a pole: " .. (AuDHDDB.fishLoudOff and "off" or "on")
   end
   if arg == "on" or arg == "off" then AuDHDDB.fishOff = arg == "off" or nil end
-  local pick = ({ right = "BUTTON2", middle = "BUTTON3", ["4"] = "BUTTON4", ["5"] = "BUTTON5" })[arg]
+  local pick = ({ right = "BUTTON2", middle = "BUTTON3", ["4"] = "BUTTON4", ["5"] = "BUTTON5", space = "SPACE" })[arg]
   if pick then AuDHDDB.fishButton = pick ~= "BUTTON2" and pick or nil end
   if owner then bound = nil watch() end
   local name

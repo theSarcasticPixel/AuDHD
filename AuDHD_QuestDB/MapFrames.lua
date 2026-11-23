@@ -4,7 +4,7 @@
 local Q = AuDHDEngine and AuDHDEngine.QuestDB
 if not (Q and Q.SetMeta) then return end
 
-Q.SetMeta({items=2721,npcs=5168,objects=975,quests=5407,schema=2})
+Q.SetMeta({items=3073,npcs=5760,objects=1141,quests=6093,schema=2})
 
 if AuDHDEngine.RegisterMapFrames then
 	AuDHDEngine.RegisterMapFrames({ era = {
@@ -12,7 +12,6 @@ if AuDHDEngine.RegisterMapFrames then
 		[1412] = {bottom=-3697.917,c=1,left=2047.917,right=-3089.583,top=-272.917},
 		[1413] = {bottom=-5143.75,c=1,left=2622.917,right=-7510.417,top=1612.5},
 		[1414] = {bottom=-11733.3,c=1,left=17066.6,right=-19733.211,top=12799.9},
-		[1415] = {bottom=-16000,c=0,left=16000,right=-19199.9,top=7466.6},
 		[1416] = {bottom=-366.667,c=0,left=783.333,right=-2016.667,top=1500},
 		[1417] = {bottom=-2533.333,c=0,left=-866.667,right=-4466.667,top=-133.333},
 		[1418] = {bottom=-7547.917,c=0,left=-2079.167,right=-4566.667,top=-5889.583},

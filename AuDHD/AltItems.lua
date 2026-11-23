@@ -7,7 +7,6 @@ local _, ns = ...
 local A = {}
 ns.altItems = A
 
-local BANK = BANK_CONTAINER or -1
 local ARRIVED = 65 * 60   -- mail with items takes an hour: after that, what isn't in the mailbox has been collected
 local MAX_FOUND = 40
 
@@ -96,7 +95,7 @@ end
 local bankOpen = false
 function A.scanBank()
   local rec = mine()
-  if not (rec and bankOpen) or numSlots(BANK) == 0 then return end
+  if not (rec and bankOpen) or numSlots(ns.bankMain()) == 0 then return end
   rec.bank, rec.bankSlots = scan(ns.bankBagIDs())
   rec.bankSeen = time and time() or nil
 end
@@ -616,18 +615,65 @@ function A.openBank(toggle)
   A.openBags(name)
   return true
 end
--- after the game's open-all-bags with Shift held (Shift-B): your bank window opens and closes with the bags. Only ever
--- after the game's own code has run, so its bag frames are never opened from here
-function A.allBagsToggled()
-  if not (IsShiftKeyDown and IsShiftKeyDown()) then return end
-  local name = me()
-  if not name then return end
-  if IsBagOpen and IsBagOpen(0) then
-    A.openBank()
-  else
-    local w = bagWins[name]
-    if w and w:IsShown() and w.view == "bank" then w:Hide() end
+-- the bank window with your bags: on or off, and the way ("key": Shift-B, "click": Shift-click on the backpack)
+function A.bankWithBags() return not AuDHDDB.bankWithBagsOff end
+function A.bankWay() return AuDHDDB.bankWay == "click" and "click" or "key" end
+function A.setBankWithBags(on)
+  AuDHDDB.bankWithBagsOff = not on or nil
+  A.bindKeys()
+end
+function A.setBankWay(way)
+  AuDHDDB.bankWay = way == "click" and "click" or nil
+  A.bindKeys()
+end
+-- your bank window with your backpack, the way picked: a shift-click on the backpack button, seen as the backpack window
+-- opens (the game's own bag frames, OnShow and OnHide hooks); or Shift-B, seen as the key goes down (A.bagKeyDown), as
+-- in game the bag window opening from Shift-B no longer sees Shift held. It closes with the backpack. The game's bag
+-- frames are never opened from here: Shift-B stays the game's own open-all-bags (bindKeys)
+local followed   -- the bank window was opened with the backpack
+local shiftB     -- Shift-B is the game's open-all-bags, set by bindKeys
+function A.backpackShown()
+  if not A.bankWithBags() or A.bankWay() ~= "click" or not (IsShiftKeyDown and IsShiftKeyDown()) then return end
+  local b = _G.MainMenuBarBackpackButton
+  if not (b and b.IsMouseOver and b:IsMouseOver()) then return end
+  if A.openBank() then followed = true end
+end
+-- a backpack window still open: the combined bags, or a bag window showing the backpack
+local function backpackOpen()
+  local c = _G.ContainerFrameCombinedBags
+  if c and c:IsShown() then return true end
+  for i = 1, NUM_CONTAINER_FRAMES or 13 do
+    local f = _G["ContainerFrame" .. i]
+    if f and f:IsShown() and f.GetID and f:GetID() == 0 then return true end
   end
+  return false
+end
+A.backpackOpen = backpackOpen
+-- every key you press, passed on to the game as always: B with Shift (IsShiftKeyDown, or the game's MODIFIER_STATE_CHANGED
+-- for each Shift key, down and up: a key frame never hears Shift come up), and nothing else held, before the game's
+-- open-all-bags runs. Bags closed: the bank opens with them. Bags open: they close, and the bank with them
+-- (A.backpackHidden)
+local shiftDown = {}
+function A.modifierChanged(key, down)
+  if key == "LSHIFT" or key == "RSHIFT" then shiftDown[key] = down == 1 or down == true or nil end
+end
+function A.bagKeyDown(key)
+  if key ~= "B" or not shiftB or not A.bankWithBags() or A.bankWay() ~= "key" then return end
+  if not (shiftDown.LSHIFT or shiftDown.RSHIFT or (IsShiftKeyDown and IsShiftKeyDown())) then return end
+  if (IsControlKeyDown and IsControlKeyDown()) or (IsAltKeyDown and IsAltKeyDown()) then return end
+  if backpackOpen() then return end
+  if A.openBank() then followed = true end
+end
+-- looked at a moment later: the game can close one backpack window as it opens the other (Shift-B: the bag window, then
+-- the combined bags), and the bank stays while either is open
+function A.backpackHidden()
+  if not followed then return end
+  C_Timer.After(0, function()
+    if not followed or backpackOpen() then return end
+    followed = nil
+    local w = bagWins[me() or ""]
+    if w and w:IsShown() and w.view == "bank" then w:Hide() end
+  end)
 end
 local function redraw() for _, w in pairs(bagWins) do if w:IsShown() then pcall(draw, w) end end end
 A.redraw = redraw
@@ -739,14 +785,17 @@ local function hookBags()
     local f = _G["ContainerFrame" .. i]
     if f and f.HookScript then
       f:HookScript("OnShow", function(self)
-        if self.GetID and self:GetID() == 0 then pcall(placeBagButton, self) end
+        if self.GetID and self:GetID() == 0 then pcall(placeBagButton, self) pcall(A.backpackShown) end
+      end)
+      f:HookScript("OnHide", function(self)
+        if self.GetID and self:GetID() == 0 then pcall(A.backpackHidden) end
       end)
     end
   end
   if ContainerFrameCombinedBags and ContainerFrameCombinedBags.HookScript then
-    ContainerFrameCombinedBags:HookScript("OnShow", function(self) pcall(placeBagButton, self) end)
+    ContainerFrameCombinedBags:HookScript("OnShow", function(self) pcall(placeBagButton, self) pcall(A.backpackShown) end)
+    ContainerFrameCombinedBags:HookScript("OnHide", function() pcall(A.backpackHidden) end)
   end
-  if hooksecurefunc and ToggleAllBags then hooksecurefunc("ToggleAllBags", function() pcall(A.allBagsToggled) end) end
 end
 -- /audhd bags [all|close|<name>]
 function A.bagsCommand(rest)
@@ -766,9 +815,10 @@ end
 
 -- ------------------------------------------------------------------ events
 local frame = ns.newFrame("AltItems", "Frame")
--- Shift-B runs the game's own open-all-bags, as an override (your saved key bindings stay as they are), and the bank
--- window follows (A.allBagsToggled). B does too while you have a reagent bag and the setting is on, so it opens with
--- the backpack. Neither key when it's bound to something other than your bags. Out of combat only (waits for it)
+-- Shift-B, with the bank on Shift-B, runs the game's own open-all-bags, as an override (your saved key bindings stay as
+-- they are), and the bank window follows (A.bagKeyDown). B does too while you have a reagent bag and the setting is
+-- on, so it opens with the backpack. Neither key when it's bound to something other than your bags. Out of combat only
+-- (waits for it)
 local hadReagent
 local function bindKeys()
   if not (GetBindingAction and SetOverrideBinding and ClearOverrideBindings) then return end
@@ -782,10 +832,17 @@ local function bindKeys()
   end
   hadReagent = reagentBag() ~= nil
   ClearOverrideBindings(frame)
-  if bagKey("SHIFT-B") then SetOverrideBinding(frame, false, "SHIFT-B", "OPENALLBAGS") end
+  shiftB = A.bankWithBags() and A.bankWay() == "key" and bagKey("SHIFT-B") and true or nil
+  if shiftB then SetOverrideBinding(frame, false, "SHIFT-B", "OPENALLBAGS") end
   if hadReagent and A.reagentOn() and bagKey("B") then SetOverrideBinding(frame, false, "B", "OPENALLBAGS") end
 end
 A.bindKeys = bindKeys
+local keys = ns.newFrame("AltItems", "Frame", nil, UIParent)
+keys:EnableKeyboard(true)
+if keys.SetPropagateKeyboardInput then keys:SetPropagateKeyboardInput(true) end
+keys:SetScript("OnKeyDown", function(_, key) pcall(A.bagKeyDown, key) end)
+pcall(keys.RegisterEvent, keys, "MODIFIER_STATE_CHANGED")
+keys:SetScript("OnEvent", function(_, _, key, down) pcall(A.modifierChanged, key, down) end)
 for _, e in ipairs({ "PLAYER_LOGIN", "BAG_UPDATE_DELAYED", "BANKFRAME_OPENED", "BANKFRAME_CLOSED", "PLAYERBANKSLOTS_CHANGED",
                      "MAIL_INBOX_UPDATE", "MAIL_SEND_SUCCESS", "MAIL_FAILED" }) do
   pcall(frame.RegisterEvent, frame, e)

@@ -10,9 +10,10 @@
 --     The client's own name first (a quest's title, C_QuestLog; an item's,
 --     C_Item; an NPC's or object's as the client named it in play, below),
 --     then the names pack of its language, Names.lua in the language folder
---     Polestar_<locale> (built by `forge data names`; our guides' texts share
---     the folder), loaded on demand on the first
---     ask (or already in through GuideTexts), else nil. Always nil on an English client (enUS, enGB), which
+--     Polestar_<locale> (built by `forge data names`; our guides' texts and
+--     the interface strings share the folder), already in through
+--     Core/Locale.lua (when that failed, loaded on demand on the first ask),
+--     else nil. Always nil on an English client (enUS, enGB), which
 --     loads nothing. A quest or item the client has not cached is asked for,
 --     once a session; when the asked names arrive (QUEST_DATA_LOAD_RESULT,
 --     ITEM_DATA_LOAD_RESULT) one STEP_UPDATED redraws the guide window.
@@ -24,7 +25,9 @@
 --     each -> name | nil, nil on an English client
 --   Names.Get(kind, id) -> name | nil   -- the above by kind (quest npc object
 --     item spell faction map area taxi encounter), and any other kind a pack
---     adds (its table only)
+--     adds (its table only): "subzone", a walking map's area by its
+--     WMOAreaTable row, named as the client's subzone there (the folder's
+--     Subzones.lua, `forge data subzones`; Nav/Walk.lua's floor by subzone)
 --   Names.Cached(kind, id) -> name | nil   -- the same, never asking the
 --     server; an item's name from the pack only (Lookup indexes thousands)
 --   Names.Learn(unit) -> name | nil   -- remembers the name the client shows
@@ -79,8 +82,12 @@ end
 
 -- One redraw for a burst of arrivals: the guide window refills its rows
 -- (GuideFrame's STEP_UPDATED) with the names now cached.
+-- (Names.revision counts them: the step browser draws its skipped cards,
+-- whose reasons name quests, again when it moves.)
+Names.revision = 0
 local function redraw()
 	redrawing = false
+	Names.revision = Names.revision + 1
 	local E = ns.Engine
 	local step = E and E.GetStepIndex and E.GetStepIndex()
 	if step then ns.Fire("STEP_UPDATED", step) end
@@ -249,6 +256,13 @@ function Names.Get(kind, id)
 	if fn then return fn(id) end
 	if not valid(id) then return nil end
 	return fromPack(kind, id)
+end
+
+-- A game name in the client's language (Names.Get), else `english` through
+-- Polestar's own strings: the names the settings' previews show ("Kobold
+-- Vermin" read "Kobold Vermin" in every language).
+function Names.Or(kind, id, english)
+	return Names.Get(kind, id) or ns.L[english]
 end
 
 function Names.Cached(kind, id)

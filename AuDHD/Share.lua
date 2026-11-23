@@ -604,6 +604,8 @@ local function window(name, w, h, title)
   return f
 end
 
+S.window, S.setTitle = window, setTitle   -- (the shopping list import, the gathering checklist)
+
 local function label(parent, font, width)
   local t = parent:CreateFontString(nil, "OVERLAY", font)
   t:SetWidth(width)
@@ -637,6 +639,7 @@ local function keepText(box, text)
   box.keep = text
   box:SetText(text)
 end
+S.readOnly, S.keepText = readOnly, keepText   -- (the guild text copy box)
 
 -- the ask: never takes the keyboard, and waits out a fight
 local ask, askPending

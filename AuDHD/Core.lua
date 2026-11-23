@@ -20,8 +20,9 @@ end
 
 -- ------------------------------------------------------------------ the guide engine's slot
 -- provider: current() -> step, i, pos, total, via; peek(k) -> step, i; ahead(limit) -> steps; info() -> { title, ends,
--- rares }; isDone(step, i); memLeft(m); markDone(reason); back(); later(); jump(n); advance(reason) -> true when the
--- step changed; plannedReward(questID); hasWork(questID). A step: k kind, t text, q quest, m uiMap, x, y (0..100), and
+-- rares }; isDone(step, i); memLeft(m); markDone(reason); back(); later(); jump(n); offLive() -> true when the step on
+-- screen isn't the live one; toLive(); stepMobs() -> the names of the mobs it still wants; advance(reason) -> true when
+-- the step changed; plannedReward(questID); hasWork(questID). A step: k kind, t text, q quest, m uiMap, x, y (0..100), and
 -- whatever else the engine carries.
 C.provider = nil
 local function ask(name, ...)
@@ -38,6 +39,9 @@ function C.memLeft(m) return ask("memLeft", m) end
 function C.back() return ask("back") end
 function C.later() return ask("later") end
 function C.jump(n) return ask("jump", n) end
+function C.offLive() return ask("offLive") end
+function C.toLive() return ask("toLive") end
+function C.stepMobs() return ask("stepMobs") or {} end
 function C.markDone(reason) return ask("markDone", reason) end
 function C.plannedReward(questID) return ask("plannedReward", questID) end
 -- the engine says its step changed (or plugged in): the arrow, the window, the map and the item button look again
@@ -556,6 +560,7 @@ frame:SetScript("OnEvent", function(_, event, ...)
     if name ~= "AuDHD" then return end
     AuDHDDB = AuDHDDB or {}
     AuDHDDB.auto = AuDHDDB.auto or {}
+    if ns.accountData then pcall(ns.accountData.adopt) end
     return
   end
   if event == "PLAYER_LOGIN" then
@@ -575,6 +580,7 @@ frame:SetScript("OnEvent", function(_, event, ...)
     if ns.settings then pcall(ns.settings.register) end
     if ns.guide then pcall(ns.guide.start) end
     if ns.extra then pcall(ns.extra.enable) end
+    if ns.questMarks then pcall(ns.questMarks.enable) end
     if ns.track then pcall(ns.track.enable) end
     for e in pairs(events) do pcall(frame.RegisterEvent, frame, e) end
     -- the quest log isn't ready at login: look a moment later
@@ -598,15 +604,15 @@ local function say(msg) print("|cff66ccffAuDHD|r: " .. msg) end
 local HELP = { { "(show/hide)", "ui" }, { "note <text>" }, { "done", "guide" }, { "later", "guide" },
   { "unskip", "guide" }, { "back", "guide" }, { "goto <n>", "guide" }, { "settings" }, { "minimap on|off" },
   { "auto" }, { "ammo [off|<count>]" }, { "arrow", "arrow" }, { "map on|off", "routemap" },
-  { "threat on|off", "threat" }, { "rares all|route|off", "rare" }, { "perf", "perf" }, { "spec [name]" },
+  { "threat on|off", "threat" }, { "combo on|off", "combo" }, { "rares all|route|off", "rare" }, { "perf", "perf" }, { "spec [name]" },
   { "imbue [off|on]", "imbue" }, { "shards [off|on|max <n>|low <n>|lock|unlock|reset]", "shards" },
   { "heal [on|off|setup]", "heal" },
-  { "fish [on|off|right|middle|4|5|status|loud on|off|volume <10-100>|lure on|off|zone on|off|map on|off|go|gear on|off|food on|off|button on|off]" },
+  { "fish [on|off|right|middle|4|5|space|status|loud on|off|volume <10-100>|lure on|off|zone on|off|map on|off|go|gear on|off|food on|off|button on|off]" },
   { "bigmap [on|off|replace on|off]", "bigmap" }, { "atlas on|off (work in progress)", "atlas" },
-  { "buffs [off|on]" }, { "food [off|on]" }, { "scrolls [off|on]" }, { "announce [off|on]", "questDone" },
+  { "buffs [off|on]" }, { "food [off|on]" }, { "scrolls [off|on]" }, { "shout [off|on]", "imbue" }, { "motd", "guildCopy" }, { "announce [off|on]", "questDone" },
   { "askbuffs [off|on]", "buffAsk" }, { "stats [show|hide|lock|unlock|reset|move|bags|repair|volume]" },
   { "paths [detailed|straight]", "walk" }, { "bankalt [<name>|off|on|clear]" }, { "find <item>" },
-  { "bags [all|close|<name>]" }, { "ah [scan|on|off|price <item>]" }, { "blocked", "walk" }, { "unblock", "walk" },
+  { "bags [all|close|<name>]" }, { "ah [scan|on|off|price <item>]" }, { "gather [<list>|show|hide|stop]", "gather" }, { "blocked", "walk" }, { "unblock", "walk" },
   { "where", "track" }, { "guides", "picker" }, { "dungeons [name]", "dungeons" }, { "extra", "extra" },
   { "share", "share" }, { "report", "share" }, { "log" } }
 SLASH_AUDHD1 = "/audhd"
@@ -660,6 +666,8 @@ SlashCmdList.AUDHD = function(input)
     say(ns.range.command(rest))
   elseif cmd == "threat" and ns.threat then
     say(ns.threat.command(rest))
+  elseif cmd == "combo" and ns.combo then
+    say(ns.combo.command(rest))
   elseif cmd == "perf" and ns.perf then
     say(ns.perf.run(say))
   elseif cmd == "rares" and ns.rare then
@@ -679,6 +687,9 @@ SlashCmdList.AUDHD = function(input)
     say(ns.imbue.command(rest))
   elseif cmd == "heal" and ns.heal then
     say(ns.heal.command(rest))
+  elseif cmd == "gather" and ns.gather then
+    local r = ns.gather.command(rest)
+    if r then say(r) end
   elseif cmd == "fish" and ns.fishing then
     say(ns.fishing.command(rest))
   elseif cmd == "dungeons" and ns.dungeons then
@@ -697,6 +708,11 @@ SlashCmdList.AUDHD = function(input)
     say(ns.imbue.command(rest, "food"))
   elseif cmd == "scrolls" and ns.imbue then
     say(ns.imbue.command(rest, "scrolls"))
+  elseif cmd == "shout" and ns.imbue then
+    say(ns.imbue.shoutCommand(rest))
+  elseif cmd == "motd" and ns.guildCopy then
+    local r = ns.guildCopy.command()
+    if r then say(r) end
   elseif cmd == "blocked" and ns.walk then
     local n, ax, ay, bx, by = ns.walk.block()
     if n > 0 then

@@ -1,6 +1,7 @@
 -- A profession trainer's recipe tooltip: what the item it makes is worth (vendor, auction, disenchant), what its
--- reagents cost at auction, and the return: the best of the three less the reagents. Prices are the auction scans'
--- (Auction.lua); the reagents are read from the tooltip's own "Reagents:" line. Setting "trainerValueOff".
+-- reagents cost, and the return: the best of the three less the reagents. Prices are the auction scans' (Auction.lua),
+-- a reagent's vendor price when cheaper (CraftValue.lua); the reagents are read from the tooltip's own "Reagents:"
+-- line. Setting "trainerValueOff".
 local _, ns = ...
 local T = {}
 ns.trainerValue = T
@@ -43,13 +44,13 @@ local function tooltipReagents(tip)
   end
 end
 
--- what reagents cost at auction: total, and how many had no price
+-- what reagents cost (at auction, or from a vendor when cheaper): total, and how many had no price
 function T.reagentCost(list)
   local A = ns.auction
   local total, missing = 0, 0
   for _, r in ipairs(list or {}) do
     local id = A and A.idByName(r[1])
-    local p = id and A.price(id)
+    local p = id and ((ns.craft and ns.craft.materialEach(id)) or A.price(id))
     if p then total = total + p * r[2] else missing = missing + 1 end
   end
   return total, missing
@@ -71,8 +72,8 @@ function T.lines(link, reagents)
   local best = math.max(vendor or 0, auction or 0, de or 0)
   if reagents and #reagents > 0 then
     local cost, missing = T.reagentCost(reagents)
-    local note = missing > 0 and (" |cff999999(%d not seen at auction)|r"):format(missing) or ""
-    out[#out + 1] = { "Reagents at auction", coins(cost) .. note, 1, 1, 1 }
+    local note = missing > 0 and (" |cff999999(%d not priced)|r"):format(missing) or ""
+    out[#out + 1] = { "Reagents", coins(cost) .. note, 1, 1, 1 }
     if best > 0 and missing < #reagents then
       local ret = best - cost
       out[#out + 1] = { "Return", (ret < 0 and "-" or "+") .. coins(math.abs(ret)), ret < 0 and 1 or 0.25, ret < 0 and 0.25 or 1, 0.25 }

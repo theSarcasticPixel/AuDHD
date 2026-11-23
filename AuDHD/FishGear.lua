@@ -99,6 +99,15 @@ local function saysNo(ls)
   return false
 end
 
+-- whether you can use an item now: its level isn't above yours, else (the game hasn't sent its level yet) its tooltip has
+-- no red line
+function G.canUse(item)
+  local get = C_Item and C_Item.GetItemInfo or GetItemInfo
+  local minLevel = get and select(5, get(item))
+  if type(minLevel) == "number" then return minLevel <= (UnitLevel("player") or 0) end
+  return not saysNo(lines("GetHyperlink", type(item) == "number" and ("item:" .. item) or item))
+end
+
 local gearCache, foodCache = {}, {}   -- link -> { value, can wear }; item id -> value
 local function gearValue(link)
   if not link then return 0, true end
@@ -378,7 +387,8 @@ function G.food()
         v = fishValue(ls, true)
         if #ls > 0 then foodCache[id] = v end
       end
-      if v > 0 and (not best or v > value) then best, value = id, v end
+      -- (one you can't eat yet, a higher level's, would be tried every click and the pole never cast)
+      if v > 0 and (not best or v > value) and G.canUse(link) then best, value = id, v end
     end
   end)
   lastFood = best or lastFood

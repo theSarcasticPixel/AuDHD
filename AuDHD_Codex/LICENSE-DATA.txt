@@ -18,12 +18,12 @@ Licence: Blizzard Entertainment game client data; factual map geometry, names an
 
 QuestieDB (Questie-Forever), baked Forever store and support data
 -----------------------------------------------------------------
-Version: 1.0.6 36ca1ca86f6c1838de479c7c7452eb0a57d5c135
+Version: 1.1.2 e1652ce62113c152da682baf2d6fb85f1396bcfb
 Licence: No license file in Questie/Questie or Questie/QuestieDB; CurseForge lists GPL-3.0, and the maintainers ask that it be treated as all rights reserved (https://github.com/Questie/Questie/issues/4447). Read from the local install; facts only (quest, NPC, object and item facts, no code or text) ship in Polestar's packs, credited here, and come out if the maintainers ask (data build --no-questie).
 
 Quest XP for quests QuestieDB lacks: two Forever web quest databases (one from the beta client's quest cache)
 -------------------------------------------------------------------------------------------------------------
-Version: 561 quests; cache data/sources/webxp/quest-xp.json
+Version: 133 quests; cache data/sources/webxp/quest-xp.json
 Licence: Public web pages; facts (XP numbers) only, used locally with permission
 
 the web quest database: zone quest lists (XP, levels, Forever change notes)
@@ -31,10 +31,15 @@ the web quest database: zone quest lists (XP, levels, Forever change notes)
 Version: 4234 listed quests read 2026-10-16T16:29:21.749Z; cache data/sources/web/zones.json
 Licence: Public web pages; facts (ids, XP, levels, instance categories, rewards) only, used locally
 
-World of Warcraft: Forever client tables (UiMap, UiMapAssignment, AreaTable, ChrRaces, ChrClasses, CharBaseInfo, Faction, Map, ItemSparse, SpellName, SpellEffect) read from the installed client
--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
-Version: wow_classic_beta 1.60.1.70532
+World of Warcraft: Forever client tables (UiMap, UiMapAssignment, AreaTable, ChrRaces, ChrClasses, CharBaseInfo, Faction, Map, ItemSparse, SpellName, SpellEffect) via wago.tools
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Version: wow_classic_beta 1.60.1.70888
 Licence: Blizzard Entertainment game client data; factual map geometry, names, item durations and race/class combinations only
+
+Polestar recordings
+-------------------
+Version: 737cdd4a253f21d6
+Licence: Polestar original work
 
 CMaNGOS classic-db: creature and gameobject spawn heights
 ---------------------------------------------------------
@@ -56,9 +61,18 @@ Forever TrinityCore world database (sniffed spawns, quest objectives, timers, lo
 Version: forever-tdb-2026-10-14 + 367ac384fa20
 Licence: GPL-2.0; used as facts: objective counts, quest time limits and next quests, sniffed spawn positions (gathering nodes too), sniffed drop rates, class trainer lists and costs, profession trainers' learn ranks and costs
 
+EG Link output: World of Warcraft: Forever
+------------------------------------------
+Version: 164bd1e2d89579ada4ee5e2de7e5fd4db684a9f1
+Licence: CC BY 4.0; facts used: quest levels, XP, objectives and counts, next quests, givers and enders, races, quest-tied drop rates
+
+Polestar quest mechanics: kinds, parameters and steps (facts in our own words), checked against the Forever TrinityCore world DB
+--------------------------------------------------------------------------------------------------------------------------------
+Licence: Polestar original work; structured facts from CMaNGOS classic-db (GPL-3.0) and the Forever TrinityCore world DB (GPL-2.0) used as facts
+
 Polestar's open Forever database (forever-db): quest XP
 -------------------------------------------------------
-Version: 4293 quests; forever-db/data/quest.jsonl
+Version: 4387 quests; forever-db/data/quest.jsonl
 Licence: See forever-db/NOTICE.md and datapackage.json
 
 The web quest database's Forever pages: NPC and object pages, item tooltips, NPC list levels
@@ -66,9 +80,9 @@ The web quest database's Forever pages: NPC and object pages, item tooltips, NPC
 Version: 1118 entities, 15205 listed NPCs; cache data/sources/web/codex
 Licence: Public web pages; facts only (levels, classification, positions, drop counts, requirements)
 
-Curated instance entrances (data/codex/entrances.json): QuestieDB Forever dungeon table, warcraft.wiki.gg, the web quest database (Forever pages)
--------------------------------------------------------------------------------------------------------------------------------------------------
-Version: 30 entrances
+Curated instance entrances (data/codex/entrances.json): QuestieDB Forever dungeon table, warcraft.wiki.gg, the web quest database (Forever pages), Polestar Recorder sessions
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Version: 33 entrances
 Licence: Facts only (coordinates), each entry with its source
 
 Curated reputation gates (data/codex/repgates.json): warcraft.wiki.gg, the web quest database's Classic reputation guides, QuestieDB
@@ -78,17 +92,32 @@ Licence: Facts only (standings), each row with its source
 
 Curated attunement goals (data/codex/attunements.json): the web quest database (Forever pages), warcraft.wiki.gg
 ----------------------------------------------------------------------------------------------------------------
-Version: 15 attunements
+Version: 16 attunements
 Licence: Facts only (quest and item ids), each entry with its sources
 
-Curated Dungeons journal quests (data/codex/journal-quests.json): the web quest database (Forever pages)
---------------------------------------------------------------------------------------------------------
-Version: 1 quests
+Curated dungeon levels (data/codex/levels.json): in-game checks
+---------------------------------------------------------------
+Version: 3 dungeons
+Licence: Facts only (levels), each row with its source
+
+Polestar Recorder sessions (data/codex/recorded.json): loot, merchant and quest reward windows, and dungeon entry levels
+------------------------------------------------------------------------------------------------------------------------
+Version: 8618 sessions of 315 counted players; 3265 NPCs, 711 objects, 994 vendors, 1099 quests, 24 dungeons
+Licence: Polestar's own recordings: CC BY 4.0; facts only, no player data
+
+Polestar Recorder sessions (data/recorded/quests.json): Forever-new quests' prerequisites and objective spots
+-------------------------------------------------------------------------------------------------------------
+Version: 1990 quests
+Licence: Facts only (quest ids, levels, positions); counts of players, no player data
+
+Curated Dungeons journal quests (data/codex/journal-quests.json): the web quest database (Forever pages), Polestar Recorder sessions
+------------------------------------------------------------------------------------------------------------------------------------
+Version: 46 quests
 Licence: Facts only (quest ids and instances), each row with its source
 
 World of Warcraft: Forever client tables via wago.tools
 -------------------------------------------------------
-Version: 1.60.1.70532
+Version: 1.60.1.70888
 Licence: Blizzard Entertainment game data, facts only
 
 World of Warcraft Classic Era client item tables via wago.tools (items missing from the Forever tables)

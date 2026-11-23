@@ -7,7 +7,7 @@ local R = {}
 ns.route = R
 
 local SAMPLE_EVERY, TICK = 0.1, 0.2   -- seconds: the planner's reading of where you are; keeping it fed while no arrow shows
-local BETWEEN_MAX = 1500              -- yards: further apart, the line between two later steps stays Walk.lua's, which flies
+local BETWEEN_MAX = 1500              -- yards: further apart, the line between two later steps is the travel planner's
 local BETWEEN_KEEP = 64               -- later-step lines kept
 local SAME_SPOT = 0.03                -- of a map's 100: the same place
 
@@ -126,6 +126,8 @@ local function flatten(g, c)
   end
   return { c = c, pts = pts, len = len, at = 1 }
 end
+-- whether the travel planner is on (else the lines are Walk.lua's, at once)
+function R.planning() return nav() ~= nil end
 function R.toStep(step)
   local N = nav()
   if not (N and ready(step)) then return nil end
@@ -139,13 +141,86 @@ function R.toStep(step)
 end
 
 -- ------------------------------------------------------------------ the lines between later steps
--- searched one at a time when a map wants them; Walk.lua's line until the search is in or if it finds nothing
+-- searched one at a time when a map wants them; Walk.lua's line until the search is in or if it finds nothing. far:
+-- however far apart, by the travel planner (a route another addon sent: Walk.lua's graph only has the levelling zones),
+-- and nil, not Walk.lua's line, until it's all in or when there's no way
 local kept, keptN, searching = {}, 0, false
 local function faction()
   local C = AuDHDEngine.Compat
   return C and C.GetPlayerFaction and C.GetPlayerFaction() or nil
 end
-function R.between(m1, x1, y1, m2, x2, y2)
+local function cell(c, X1, Y1, X2, Y2)
+  return ("%d:%d:%d:%d:%d"):format(c, math.floor(X1 / 8), math.floor(Y1 / 8), math.floor(X2 / 8), math.floor(Y2 / 8))
+end
+-- the engine's walk from X1, Y1 to X2, Y2: a path, false when there's none, nil while it's searched (one at a time)
+local function walk(N, A, c, X1, Y1, X2, Y2)
+  local key = cell(c, X1, Y1, X2, Y2)
+  local p = kept[key]
+  if p ~= nil or searching then return p end
+  searching = true
+  local ok = pcall(N.Path.Find, c, { x = X1, y = Y1 }, { x = X2, y = Y2 }, function(points)
+    searching = false
+    if keptN >= BETWEEN_KEEP then kept, keptN = {}, 0 end
+    keptN = keptN + 1
+    kept[key] = false
+    if not points then return end
+    local line = { legs = { { kind = "walk", pts = {} } } }
+    for _, q in ipairs(points) do line.legs[1].pts[#line.legs[1].pts + 1] = { c, q.x, q.y } end
+    kept[key] = flatten(line, c) or false
+  end, { profile = faction(), style = A.Get("nav.routeStyle") })
+  if not ok then searching = false kept[key] = false end
+  return kept[key]
+end
+
+-- far: the travel planner's legs (Nav.PlanRoute, as for the step you're on: the flights you know, boats, the tram),
+-- planned at most once a frame (each can take up to 40 ms) and kept; each walk then the engine's walk, a flight a line
+-- through the flight masters it hops (drawn, so you see where you're going), a boat, tram or portal no line across. As
+-- the engine's own route lines: a walk the crossing data lays out (handmade), or one the search found no way for, is
+-- the planner's straight line (through the pass it picked). Nil until every walk is in; false when there's no way
+local plans, plansN, done, planned = {}, 0, {}, nil
+local SIDES = { Alliance = 1, Horde = 2 }
+local function far(N, A, c, m1, X1, Y1, m2, X2, Y2)
+  local key = cell(c, X1, Y1, X2, Y2)
+  if done[key] ~= nil then return done[key] end
+  local legs = plans[key]
+  if legs == nil then
+    local now = GetTime()
+    if planned == now then return nil end
+    planned = now
+    local ok, got = pcall(N.PlanRoute, { c = c, wx = X1, wy = Y1, map = m1, target = { c = c, wx = X2, wy = Y2, map = m2 },
+      faction = SIDES[faction() or ""] or 0, known = N.GetKnownTaxiNodes(), speed = 7 })
+    legs = ok and got or false
+    if plansN >= BETWEEN_KEEP then plans, plansN, done = {}, 0, {} end
+    plansN = plansN + 1
+    plans[key] = legs
+  end
+  if not legs then done[key] = false return false end
+  local line = { legs = {} }
+  for _, leg in ipairs(legs) do
+    local a, b = leg.from, leg.to
+    if leg.kind == "walk" and a and b and a.c == c and b.c == c then
+      local w = not leg.handmade and walk(N, A, c, a.wx, a.wy, b.wx, b.wy)
+      if w == nil then return nil end
+      local pts = {}
+      if w then
+        for k = 1, #w.pts - 1, 2 do pts[#pts + 1] = w.pts[k] and { c, w.pts[k], w.pts[k + 1] } or { -1 } end
+      else
+        pts = { { c, a.wx, a.wy }, { c, b.wx, b.wy } }
+      end
+      line.legs[#line.legs + 1] = { kind = "walk", pts = pts }
+    elseif leg.kind == "fly" and leg.stops then
+      local pts = {}
+      for _, n in ipairs(leg.stops) do pts[#pts + 1] = { n.c, n.wx, n.wy } end
+      line.legs[#line.legs + 1] = { kind = "walk", pts = pts }
+    else
+      line.legs[#line.legs + 1] = { kind = "ride" }
+    end
+  end
+  done[key] = flatten(line, c) or false
+  return done[key]
+end
+
+function R.between(m1, x1, y1, m2, x2, y2, farApart)
   local W = ns.walk
   local N, A = nav()
   local function old() return W.path(m1, x1, y1, m2, x2, y2) end
@@ -154,27 +229,17 @@ function R.between(m1, x1, y1, m2, x2, y2)
   local c2, X2, Y2 = W.toWorld(m2, x2, y2)
   -- (only the continent you're on: the engine keeps one continent's maps in memory)
   if not c1 or c1 ~= c2 or c1 ~= W.player() or not N.Path.Available(c1) then return old() end
-  if math.sqrt((X2 - X1) ^ 2 + (Y2 - Y1) ^ 2) > BETWEEN_MAX then return old() end
-  local key = ("%d:%d:%d:%d:%d"):format(c1, math.floor(X1 / 8), math.floor(Y1 / 8), math.floor(X2 / 8), math.floor(Y2 / 8))
-  local p = kept[key]
-  if p then return p end
-  if p == nil and not searching then
-    searching = true
-    local ok = pcall(N.Path.Find, c1, { x = X1, y = Y1 }, { x = X2, y = Y2 }, function(points)
-      searching = false
-      if keptN >= BETWEEN_KEEP then kept, keptN = {}, 0 end
-      keptN = keptN + 1
-      kept[key] = false
-      if not points then return end
-      local pts = {}
-      for _, q in ipairs(points) do pts[#pts + 1], pts[#pts + 2] = q.x, q.y end
-      local line = { legs = { { kind = "walk", pts = {} } } }
-      for k = 1, #pts - 1, 2 do line.legs[1].pts[#line.legs[1].pts + 1] = { c1, pts[k], pts[k + 1] } end
-      kept[key] = flatten(line, c1) or false
-    end, { profile = faction(), style = A.Get("nav.routeStyle") })
-    if not ok then searching = false kept[key] = false end
+  -- (false: no way, as the progress bar counts it: SideRoute.lua)
+  if farApart then return far(N, A, c1, m1, X1, Y1, m2, X2, Y2) end
+  -- far apart: the travel planner's way, as the arrow will take it (a flight only when that's quicker). Walk.lua's graph
+  -- has whole zones missing (Dustwallow Marsh), finds no ground way there and flies round them. Nothing while it's
+  -- worked out (the map redraws); Walk.lua's line only when the planner has no way
+  if math.sqrt((X2 - X1) ^ 2 + (Y2 - Y1) ^ 2) > BETWEEN_MAX then
+    local f = far(N, A, c1, m1, X1, Y1, m2, X2, Y2)
+    if f == false then return old() end
+    return f
   end
-  return old()
+  return walk(N, A, c1, X1, Y1, X2, Y2) or old()
 end
 
 -- ------------------------------------------------------------------ what Walk.lua knows and the planner doesn't

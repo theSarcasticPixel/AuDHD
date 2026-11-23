@@ -2,7 +2,7 @@
 ## Title: AuDHD Engine
 ## Notes: The guide engine behind AuDHD, based on Polestar.
 ## Author: theSarcasticPixel, based on Polestar
-## Version: 0.3.4
+## Version: 0.4.1.1
 ## X-License: GPL-3.0-only
 ## SavedVariables: AuDHDEngineDB
 ## SavedVariablesPerCharacter: AuDHDEngineCharDB

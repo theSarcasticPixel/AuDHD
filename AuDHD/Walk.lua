@@ -472,6 +472,7 @@ local function flyTime(c, a, b, K)
   end
 end
 local FLY_MIN, RUN = 500, 7   -- yards: shorter trips walk; run speed, yd/s (a flight's seconds as yards of walking)
+local HOP = 150               -- yards: to or from a flight master, walked straight when the graph has no way
 local flyPath   -- below W.path, which it uses for the walks to and from the flight masters
 
 function W.path(m1, x1, y1, m2, x2, y2, noFly)
@@ -589,6 +590,11 @@ flyPath = function(c, X1, Y1, X2, Y2, m1, x1, y1, m2, x2, y2, groundCost)
   local a, b = best[1], best[2]
   local w1 = W.path(m1, x1, y1, a.m, a.x, a.y, true)
   local w2 = W.path(b.m, b.x, b.y, m2, x2, y2, true)
+  -- a walk the graph doesn't know (it has nothing there: the Badlands, Searing Gorge) is no way: a straight line only
+  -- across a short HOP, or with straight lines chosen. Else no flight (the straight line cut through the mountains)
+  local straight = AuDHDDB.pathStyle == "straight"
+  if not straight and ((not w1 and sqrt((a.X - X1) ^ 2 + (a.Y - Y1) ^ 2) > HOP)
+                       or (not w2 and sqrt((X2 - b.X) ^ 2 + (Y2 - b.Y) ^ 2) > HOP)) then return nil end
   local p1 = w1 and w1.pts or { X1, Y1, a.X, a.Y }
   local p2 = w2 and w2.pts or { b.X, b.Y, X2, Y2 }
   local pts = {}
@@ -679,7 +685,12 @@ end
 
 -- the way to the step you're on, kept (W.toStep, below); worked out again after a new flight path or a flight
 local live = { key = nil, path = nil, at = 0, fresh = 0 }
-function W.newPaths() live.key, live.path = nil, nil end
+-- others kept the same way, each in its own slot: the way to the first stop of a route another addon sent (RouteMap.lua)
+local slots = {}
+function W.newPaths()
+  live.key, live.path = nil, nil
+  for _, l in pairs(slots) do l.key, l.path = nil, nil end
+end
 
 -- ------------------------------------------------------------------ on a flight
 -- where the flight you took lands: while you fly, the way to the step starts there, not where you are in the air. Known
@@ -758,14 +769,46 @@ local function fresh(m, x, y, step)
   return q
 end
 W.place = place
-function W.toStep(step)
+-- a slot's way (W.toStep with a slot): the travel planner's way, however far (Route.lua's between, far), searched in the
+-- background. Asked for from where you were when first asked, until it answers, as long as you're within ASK yards of
+-- there (else it's chased as you walk, every answer too late). Kept while you stay on it; asked for again when you're
+-- more than OFF yards off it. Nil until then (live.none: there's no way from there)
+local ASK = 60
+local function slotWay(live, step, key, c, X, Y, m, x, y)
+  if live.key ~= key then live.key, live.path, live.from, live.none = key, nil, nil, nil end
+  local p = live.path
+  if p then
+    local k, off = place(p, X, Y)
+    if k and off <= OFF then p.at = k return p end
+    live.path = nil
+  end
+  local f = live.from
+  if not f or f.c ~= c or (f.X - X) ^ 2 + (f.Y - Y) ^ 2 > ASK * ASK then
+    f = { c = c, X = X, Y = Y, m = m, x = x, y = y }
+    live.from, live.none = f, nil
+  end
+  local got = ns.route and ns.route.between(f.m, f.x, f.y, step.m, step.x, step.y, true)
+  if not got then live.none = got == false or nil return nil end
+  local q = { c = got.c, len = got.len, pts = {} }
+  for k, v in ipairs(got.pts) do q.pts[k] = v end
+  q.at = place(q, X, Y) or 3
+  live.path, live.from = q, nil
+  return q
+end
+-- a slot's way known to be none from where you are (slotWay)
+function W.slotNone(slot) return slots[slot] and slots[slot].none or false end
+-- slot: kept apart from the way to the step you're on (nil), by the travel planner (slotWay)
+function W.toStep(step, slot)
+  if slot and not slots[slot] then slots[slot] = { key = nil, path = nil, at = 0, fresh = 0 } end
+  local live = slot and slots[slot] or live
   if not (step and step.m and step.x and step.y) then live.key, live.path = nil, nil return nil end
-  -- the travel planner's way when it has one (Route.lua); the graph below when it hasn't
-  local planned = ns.route and ns.route.toStep(step)
+  -- the travel planner's way when it has one (Route.lua, the step you're on only); the graph below when it hasn't
+  local planned = not slot and ns.route and ns.route.toStep(step)
   if planned then return planned end
   local c, X, Y, m, x, y = W.origin()
   if not c then return live.path end
   local key = ("%d:%.1f:%.1f"):format(step.m, step.x, step.y)
+  if slot then return slotWay(live, step, key, c, X, Y, m, x, y) end
   local p = live.key == key and live.path
   local now = GetTime()
   if p then

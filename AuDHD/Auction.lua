@@ -52,6 +52,7 @@ function A.remindOn() return not AuDHDDB.ahRemindOff end
 function A.strikeOn() return not AuDHDDB.ahStrikeOff end
 function A.bagMarksOn() return not AuDHDDB.ahBagMarksOff end
 function A.cheapMarkOn() return not AuDHDDB.ahCheapOff end
+function A.questFramesOn() return not AuDHDDB.ahQuestFramesOff end
 function A.vendorWithin() return AuDHDDB.ahVendorWithin or 20 end
 function A.setVendorWithin(v)
   v = tonumber(v)
@@ -108,6 +109,8 @@ function A.changed()
     local p = A.pages and A.pages.sell
     if p and p.list then pcall(p.list.show) end
     if A.markBags then pcall(A.markBags) end
+    if A.markBank then pcall(A.markBank) end
+    if ns.craft then pcall(ns.craft.redraw) end
   end)
 end
 -- the latest cheapest price, when it was seen, and the usual price (the middle of the last days' cheapest)
@@ -223,17 +226,19 @@ end
 
 -- ------------------------------------------------------------------ the full scan
 -- Every auction at once, once every 15 minutes (the server's limit). Read a few hundred a frame; items the game hasn't
--- loaded yet are read again for up to 30 seconds.
+-- loaded yet are read again for up to 30 seconds. The button forces one: a scan that never came back or got stuck is
+-- dropped, and the 15 minutes aren't waited for (the server may still refuse it; then it's dropped after 2 minutes)
 local scan
 function A.nextScan() return math.max(0, (db().scanAt or 0) + SCAN_GAP - now()) end
-function A.fullScan()
-  if not (open and AH.ReplicateItems) or scan then return false end
-  if A.nextScan() > 0 then return false end
-  scan = { t0 = GetTime() }
+function A.fullScan(force)
+  if not (open and AH.ReplicateItems) then return false end
+  if not force and (scan or A.nextScan() > 0) then return false end
+  local s = { t0 = GetTime() }
+  scan = s
   db().scanAt = now()
   AH.ReplicateItems()
   log("AH_SCAN", {})
-  C_Timer.After(120, function() if scan and not scan.reading then scan = nil A.refresh() end end)
+  C_Timer.After(120, function() if scan == s and not s.reading then scan = nil A.refresh() end end)
   A.refresh()
   return true
 end
@@ -381,12 +386,23 @@ local function addBundles(tip, text)
   tip:AddLine("<Alt-click> shop for a bundle", 0.6, 0.6, 0.6)
 end
 A.addBundles = addBundles
--- on the slot with the grey frame: what getting rid of it loses
+local outlines = {}   -- bag button -> its frame
+local kinds = {}      -- bag button -> what its frame shows now: "cheap", "route", "other", "spare" or nil
+local cheapSlot       -- the slot with the red frame now
+-- a frame round a bag slot: red the stack worth least, gold an item the route's quests want, blue one a quest in your
+-- log wants that the route doesn't do, grey the game's quest items no quest of the route or your log wants; and what
+-- it means, on the slot's tooltip in the same colour
+local OUTLINE = { cheap = { 1, 0.15, 0.15 }, route = { 1, 0.82, 0 }, other = { 0.3, 0.6, 1 }, spare = { 0.6, 0.6, 0.6 } }
+local MEANS = { cheap = "Lowest value", route = "Quest item on route", other = "Quest item not in route",
+                spare = "Quest item, none of your quests" }
 local function addCheap(tip)
   local o = tip.GetOwner and tip:GetOwner()
-  local x = o and cheapMarks[o]
-  if not (x and x:IsShown() and cheapSlot and tip.AddLine) then return end
-  tip:AddLine("Cheapest to get rid of (worth " .. coins(cheapSlot.value) .. ")", 0.7, 0.7, 0.7)
+  local kind, x = o and kinds[o], o and outlines[o]
+  if not (kind and x and x:IsShown() and tip.AddLine) then return end
+  local text = MEANS[kind]
+  if kind == "cheap" and cheapSlot then text = text .. " (worth " .. coins(cheapSlot.value) .. ")" end
+  local c = OUTLINE[kind]
+  tip:AddLine(text, c[1], c[2], c[3])
 end
 A.addCheap = addCheap
 local function addTip(tip, id, data)
@@ -400,9 +416,17 @@ local function addTip(tip, id, data)
   end
   if l then addHistory(tip, id) end
   pcall(addBundles, tip, tipText(tip, data))
+  if ns.craft then pcall(ns.craft.addTip, tip, id) end
 end
 A.addTip = addTip
+-- GameTooltip while it shows an item we priced: only that one is rebuilt when Shift changes. Other tooltips (a world
+-- object's, a unit's) can hold protected text the game won't rebuild for an addon
+local pricedTip = false
 local function hookTips()
+  if GameTooltip and GameTooltip.HookScript then
+    GameTooltip:HookScript("OnTooltipCleared", function() pricedTip = false end)
+    GameTooltip:HookScript("OnHide", function() pricedTip = false end)
+  end
   local function idOf(tip, data)
     if data and type(data.id) == "number" then return data.id end
     local get = tip.GetItem or (TooltipUtil and TooltipUtil.GetDisplayedItem)
@@ -413,10 +437,10 @@ local function hookTips()
     TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tip, data)
       if tip ~= GameTooltip and tip ~= ItemRefTooltip then return end
       pcall(addTip, tip, idOf(tip, data), data)
-      if tip == GameTooltip then pcall(addCheap, tip) end
+      if tip == GameTooltip then pricedTip = true pcall(addCheap, tip) end
     end)
   elseif GameTooltip and GameTooltip.HookScript then
-    GameTooltip:HookScript("OnTooltipSetItem", function(self) pcall(addTip, self, idOf(self)) pcall(addCheap, self) end)
+    GameTooltip:HookScript("OnTooltipSetItem", function(self) pricedTip = true pcall(addTip, self, idOf(self)) pcall(addCheap, self) end)
   end
 end
 
@@ -500,9 +524,9 @@ function A.markIDs()
   return set
 end
 -- The stack in your bags worth least, to get rid of when you need room: the higher of the vendor price and the auction
--- price (not for bound items), times the count. Never what the route needs, quest items, ammo, bags or quivers, or an
--- item with no known value (no vendor price and never seen at auction: keys, class items). { bag, slot, value, link }
--- or nil
+-- price (not for bound items), times the count. Never what the route needs, quest items, ammo, bags or quivers, a
+-- Waylaid Crate (by name: the game doesn't say it's for a quest), or an item with no known value (no vendor price and
+-- never seen at auction: keys, class items). { bag, slot, value, link } or nil
 local NOT_JUNK = { [1] = true, [6] = true, [11] = true, [12] = true }   -- bags, projectiles, quivers, quest items
 -- nor tools: any fishing pole (weapon subclass 20), and these, by id from the Codex: Mining Pick, Flint and Tinder (and
 -- Forever's Ceremonial ones), Thieves' Tools, the shaman totems (and Forever's Twisted ones), the blacksmith hammers,
@@ -523,7 +547,9 @@ function A.cheapestSlot()
         local _, _, _, _, _, classID, subID = C_Item.GetItemInfoInstant(link)
         local need = ns.services and ns.services.routeNeeds and ns.services.routeNeeds(id)
         local tool = A.isTool(id, classID, subID)
-        if not NOT_JUNK[classID or -1] and not need and not tool then
+        local name = get(link)
+        local crate = id == 248707 or (type(name) == "string" and name:find("^Waylaid"))
+        if not NOT_JUNK[classID or -1] and not need and not tool and not crate then
           local n = info.stackCount or 1
           local vendor = select(11, get(link))
           local value = (type(vendor) == "number" and vendor > 0) and vendor * n or nil
@@ -536,8 +562,31 @@ function A.cheapestSlot()
   end
   return best
 end
-local cheapMarks = {}   -- bag button -> its grey frame
-local cheapSlot          -- the slot marked now
+local function outline(b)
+  local x = outlines[b]
+  if x then return x end
+  x = CreateFrame("Frame", nil, b)
+  x:SetAllPoints(b)
+  x:SetFrameLevel((b:GetFrameLevel() or 0) + 5)
+  x.edges = {}
+  local W = 3
+  for _, p in ipairs({ { "TOPLEFT", "TOPRIGHT", 0, W }, { "BOTTOMLEFT", "BOTTOMRIGHT", 0, W },
+                       { "TOPLEFT", "BOTTOMLEFT", W, 0 }, { "TOPRIGHT", "BOTTOMRIGHT", W, 0 } }) do
+    local t = x:CreateTexture(nil, "OVERLAY")
+    t:SetPoint(p[1]) t:SetPoint(p[2])
+    if p[3] > 0 then t:SetWidth(p[3]) else t:SetHeight(p[4]) end
+    x.edges[#x.edges + 1] = t
+  end
+  outlines[b] = x
+  return x
+end
+function A.outlineKind(b) return kinds[b] end   -- (the smoke test)
+local function questKind(id)
+  local kind = ns.services and ns.services.questItemFor and ns.services.questItemFor(id)
+  if kind then return kind end
+  local classID = select(6, C_Item.GetItemInfoInstant(id))
+  return classID == 12 and "spare" or nil
+end
 local function eachBagButton(fn)
   local frames = {}
   for i = 1, NUM_CONTAINER_FRAMES or 13 do frames[#frames + 1] = _G["ContainerFrame" .. i] end
@@ -561,28 +610,20 @@ function A.markBags()
   local itemID = (C_Container and C_Container.GetContainerItemID) or GetContainerItemID
   eachBagButton(function(b, bag, slot)
     if not set then set, cheapSlot = A.markIDs(), A.cheapestSlot() end
-    local x = cheapMarks[b]
-    if cheapSlot and bag == cheapSlot.bag and slot == cheapSlot.slot then
-      if not x then
-        -- a grey frame round the slot
-        x = CreateFrame("Frame", nil, b)
-        x:SetAllPoints(b)
-        x:SetFrameLevel((b:GetFrameLevel() or 0) + 5)
-        local W = 3
-        for _, p in ipairs({ { "TOPLEFT", "TOPRIGHT", 0, W }, { "BOTTOMLEFT", "BOTTOMRIGHT", 0, W },
-                             { "TOPLEFT", "BOTTOMLEFT", W, 0 }, { "TOPRIGHT", "BOTTOMRIGHT", W, 0 } }) do
-          local t = x:CreateTexture(nil, "OVERLAY")
-          t:SetColorTexture(0.8, 0.8, 0.8, 1)
-          t:SetPoint(p[1]) t:SetPoint(p[2])
-          if p[3] > 0 then t:SetWidth(p[3]) else t:SetHeight(p[4]) end
-        end
-        cheapMarks[b] = x
-      end
+    local id = bag and slot and itemID(bag, slot)
+    local kind
+    if cheapSlot and bag == cheapSlot.bag and slot == cheapSlot.slot then kind = "cheap"
+    elseif id and A.questFramesOn() then kind = questKind(id) end
+    local x = outlines[b]
+    if kind then
+      x = outline(b)
+      local c = OUTLINE[kind]
+      for _, t in ipairs(x.edges) do t:SetColorTexture(c[1], c[2], c[3], 1) end
       x:Show()
     elseif x then
       x:Hide()
     end
-    local id = bag and slot and itemID(bag, slot)
+    kinds[b] = kind
     local fs = marks[b]
     if id and set[id] then
       if not fs then
@@ -598,6 +639,45 @@ function A.markBags()
     end
   end)
 end
+-- the game's bank window: gold, blue and grey round quest items there too (not red, not V/DE: nothing is sold from the
+-- bank). Its slot buttons found by walking the window: a button with a slot number whose bag is the bank's own (its
+-- GetBagID, or its parent's id, as the classic bank's buttons have), not a bag slot. Bank bags opened as bag windows
+-- are done with the bags
+local function bankButtons(f, out, depth, bank)
+  for _, c in ipairs({ f:GetChildren() }) do
+    if c.IsShown and c:IsShown() then
+      local slot = c.GetID and c:GetID()
+      local bag = c.GetBagID and c:GetBagID()
+      if bag == nil then local p = c:GetParent() bag = p and p.GetID and p:GetID() end
+      if type(slot) == "number" and slot > 0 and bag == bank and not rawget(c, "isBag") and c.GetObjectType and c:GetObjectType() == "Button" then
+        out[#out + 1] = c
+      elseif depth < 4 then
+        bankButtons(c, out, depth + 1, bank)
+      end
+    end
+  end
+  return out
+end
+function A.markBank()
+  local f = BankFrame
+  if not (f and f.IsShown and f:IsShown()) then return end
+  local itemID = (C_Container and C_Container.GetContainerItemID) or GetContainerItemID
+  local bank = ns.bankMain()
+  for _, b in ipairs(bankButtons(f, {}, 1, bank)) do
+    local id = itemID(bank, b:GetID())
+    local kind = id and A.questFramesOn() and questKind(id) or nil
+    local x = outlines[b]
+    if kind then
+      x = outline(b)
+      local c = OUTLINE[kind]
+      for _, t in ipairs(x.edges) do t:SetColorTexture(c[1], c[2], c[3], 1) end
+      x:Show()
+    elseif x then
+      x:Hide()
+    end
+    kinds[b] = kind
+  end
+end
 -- redone a moment after a bag opens or the game redraws one (its buttons are reused for other slots)
 local function hookBagMarks()
   local function soon() A.changed() end
@@ -610,6 +690,7 @@ local function hookBagMarks()
   if c and c.HookScript then c:HookScript("OnShow", soon) end
   if c and type(c.UpdateItems) == "function" then hooksecurefunc(c, "UpdateItems", soon) end
   if type(ContainerFrame_Update) == "function" then hooksecurefunc("ContainerFrame_Update", soon) end
+  if BankFrame and BankFrame.HookScript then BankFrame:HookScript("OnShow", soon) end
 end
 
 -- ------------------------------------------------------------------ what you could sell
@@ -1288,12 +1369,10 @@ local function haveOf(name)
   return ok and type(n) == "number" and n or 0
 end
 A.haveOf = haveOf
--- n of an item onto the banker's list (added to what it already wants)
-function A.addBundle(n, item, crate)
-  local who = A.banker()
-  if not who then say("set a shopping banker first: Settings, Auction house") return false end
-  local l = bankerList(who, true)
-  l.want, l.from = l.want or {}, l.from or {}
+-- n more of an item wanted on a list (added to what it already wants), and its price each then (l.est) when given:
+-- the name as the list has it
+local function addWanted(l, item, n, each)
+  l.want = l.want or {}
   local name
   for _, x in ipairs(l.items) do if x:lower() == item:lower() then name = x break end end
   if not name then
@@ -1302,11 +1381,162 @@ function A.addBundle(n, item, crate)
     table.sort(l.items, function(a, b) return a:lower() < b:lower() end)
   end
   l.want[name] = (l.want[name] or 0) + n
+  if each then
+    l.est = l.est or {}
+    l.est[name] = each
+  end
+  return name
+end
+-- n of an item onto the banker's list (added to what it already wants)
+function A.addBundle(n, item, crate)
+  local who = A.banker()
+  if not who then say("set a shopping banker first: Settings, Auction house") return false end
+  local l = bankerList(who, true)
+  l.from = l.from or {}
+  local name = addWanted(l, item, n)
   l.from[name] = ns.services and ns.services.me and ns.services.me() or nil
   say(("%d %s added to %s (%d wanted)"):format(n, name, l.name, l.want[name]))
   log("AH_BUNDLE", { n = n, crate = crate })
   if pages.shop then pages.shop.refresh() end
   return true
+end
+-- the profession window's materials: the "Crafting" list (made the first time), and its place among the lists
+function A.craftingList()
+  local all = lists()
+  for i, l in ipairs(all) do if l.name == "Crafting" and not l.owner then return l, i end end
+  local l = { name = "Crafting", items = {}, want = {} }
+  all[#all + 1] = l
+  return l, #all
+end
+-- { { name, n, each } } onto it, each added to what it already wants (Buy offers what you want less what you carry),
+-- with its price each then; the Shopping tab opens on it
+function A.shopForCrafting(items)
+  local l, i = A.craftingList()
+  for _, it in ipairs(items) do addWanted(l, it[1], it[2], it[3]) end
+  if shop.index ~= i then shop.pick, shop.all = nil, nil end
+  shop.index, AuDHDDB.ahList = i, i
+  log("AH_CRAFT_LIST", { n = #items })
+  if pages.shop then pages.shop.refresh() end
+  return l
+end
+-- Auctionator's shopping lists, as its Export gives them: one list a line, "Name^term^term"; a term is fields split by
+-- ";", the first the item ("quoted" for an exact name), the 14th the count when it has one. Its old format too: "*Name"
+-- then one item a line. Each list replaces ours of that name. Items cheaper from a vendor are left off, as on the
+-- Crafting list. Returns the lists made, or nil
+local function idOf(name)
+  local id = A.idByName(name)
+  if id then return id end
+  local ok, iid = pcall(C_Item.GetItemInfoInstant, name)
+  return ok and type(iid) == "number" and iid or nil
+end
+local function trim(s) return (s or ""):match("^%s*(.-)%s*$") end
+-- { { name, { terms } } } from the text, either format
+local function parseLists(text)
+  text = (text or ""):gsub("\r\n?", "\n")
+  local out = {}
+  if text:find("^", 1, true) then
+    for line in (text .. "\n"):gmatch("(.-)\n") do
+      local name, rest = line:match("^([^%^]*)%^(.*)$")
+      if name and trim(name) ~= "" then
+        local terms = {}
+        for t in (rest .. "^"):gmatch("(.-)%^") do terms[#terms + 1] = t end
+        out[#out + 1] = { trim(name), terms }
+      end
+    end
+  elseif text:find("*", 1, true) then
+    for chunk in ("*" .. text):gsub("%*+", "*"):gmatch("%*([^%*]*)") do
+      local lines = {}
+      for line in (chunk .. "\n"):gmatch("(.-)\n") do if trim(line) ~= "" then lines[#lines + 1] = trim(line) end end
+      if #lines > 0 then out[#out + 1] = { lines[1], { unpack(lines, 2) } } end
+    end
+  end
+  return out
+end
+function A.importAuctionator(text)
+  local all, made, vendor, n = lists(), {}, {}, 0
+  for _, pl in ipairs(parseLists(text)) do
+    local l
+    for _, x in ipairs(all) do if x.name == pl[1] and not x.owner then l = x break end end
+    if not l then
+      l = { name = pl[1] }
+      all[#all + 1] = l
+    end
+    l.items, l.want, l.est = {}, {}, nil
+    for _, term in ipairs(pl[2]) do
+      local fields = {}
+      for f in (term .. ";"):gmatch("(.-);") do fields[#fields + 1] = f end
+      local item = trim(fields[1]):match('^"?(.-)"?$')
+      local count = tonumber(fields[14])
+      if item ~= "" then
+        local id = idOf(item)
+        local each, from
+        if id and ns.craft and ns.craft.materialEach then each, from = ns.craft.materialEach(id) end
+        if from == "vendor" then
+          vendor[#vendor + 1] = (count and (count .. " ") or "") .. item
+        elseif count and count > 0 then
+          addWanted(l, item, math.floor(count), each)
+          n = n + 1
+        else
+          A.addToListOf(l, item)
+          n = n + 1
+        end
+      end
+    end
+    made[#made + 1] = l
+  end
+  if #made == 0 then say("that isn't an Auctionator shopping list") return nil end
+  for i, x in ipairs(all) do
+    if x == made[1] then
+      if shop.index ~= i then shop.pick, shop.all = nil, nil end
+      shop.index, AuDHDDB.ahList = i, i
+    end
+  end
+  local names = {}
+  for _, l in ipairs(made) do names[#names + 1] = l.name end
+  say(("imported %s: %d item%s"):format(table.concat(names, ", "), n, n == 1 and "" or "s"))
+  if #vendor > 0 then say("left off, cheaper from a vendor: " .. table.concat(vendor, ", ")) end
+  log("AH_IMPORT", { lists = #made, n = n, vendor = #vendor })
+  if pages.shop then pages.shop.refresh() end
+  return made
+end
+-- the paste window: a box that keeps line breaks (an export with several lists has one a line)
+local importWin
+function A.showImport()
+  if not importWin then
+    local S = ns.share
+    importWin = S.window("AuDHDImportWindow", 460, 300, "AuDHD: import a shopping list")
+    local intro = importWin:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    intro:SetWidth(420)
+    intro:SetJustifyH("LEFT")
+    intro:SetPoint("TOPLEFT", 18, -32)
+    intro:SetText("Paste an Auctionator shopping list (Ctrl+V): its Export, or a guide site's import string.")
+    local scroll = ns.newFrame("Auction", "ScrollFrame", "AuDHDImportScroll", importWin, "UIPanelScrollFrameTemplate")
+    scroll:SetPoint("TOPLEFT", 18, -56)
+    scroll:SetSize(398, 190)
+    local box = ns.newFrame("Auction", "EditBox", "AuDHDImportBox", scroll)
+    box:SetMultiLine(true)
+    box:SetMaxLetters(0)
+    box:SetAutoFocus(false)
+    box:SetFontObject("GameFontHighlightSmall")
+    box:SetWidth(394)
+    -- the whole paste area takes a click back into the box: a multi-line box is only as tall as its text
+    box:SetHeight(190)
+    box:SetScript("OnEscapePressed", function(self) self:ClearFocus() end)
+    scroll:SetScrollChild(box)
+    scroll:EnableMouse(true)
+    scroll:SetScript("OnMouseDown", function() box:SetFocus() end)
+    importWin.box = box
+    local go = ns.newFrame("Auction", "Button", nil, importWin, "UIPanelButtonTemplate")
+    go:SetSize(100, 22)
+    go:SetText("Import")
+    go:SetPoint("BOTTOMRIGHT", -16, 14)
+    go:SetScript("OnClick", function()
+      if A.importAuctionator(box:GetText()) then importWin:Hide() end
+    end)
+  end
+  importWin.box:SetText("")
+  importWin:Show()
+  importWin.box:SetFocus()
 end
 -- on the banker at login: what its list still wants, and from whom
 function A.bankerText()
@@ -1401,13 +1631,15 @@ local function hookCrates()
     pcall(A.crateClick, link)
   end)
 end
-function A.addToList(name)
-  name = name and (name:match("|h%[(.-)%]|h") or name):gsub("^%s+", ""):gsub("%s+$", "")
-  if not name or name == "" then return end
-  local l = currentList()
+function A.addToListOf(l, name)
   for _, n in ipairs(l.items) do if n:lower() == name:lower() then return end end
   l.items[#l.items + 1] = name
   table.sort(l.items, function(a, b) return a:lower() < b:lower() end)
+end
+function A.addToList(name)
+  name = name and (name:match("|h%[(.-)%]|h") or name):gsub("^%s+", ""):gsub("%s+$", "")
+  if not name or name == "" then return end
+  A.addToListOf(currentList(), name)
 end
 local function shopFind(name, done)
   A.browse(name, function(rows)
@@ -1423,9 +1655,11 @@ function A.searchList()
   for _, name in ipairs(currentList().items) do shopFind(name, function() if pages.shop then pages.shop.refresh() end end) end
 end
 -- Buy: trade goods get a quote first (Buy), then Confirm; other items buy the cheapest auction outright
+local allShow
 local function shopPick(name)
   local p = pages.shop
   shop.pick, shop.quote, shop.auction = name, nil, nil
+  if name and shop.all then shop.all = nil allShow() end
   p.buy:SetText("Buy")
   local f = name and shop.found[name:lower()]
   if not f then
@@ -1476,6 +1710,152 @@ local function shopBuy()
     log("AH_BUY", { id = f.key.itemID })
   end
 end
+-- Buy all, on a list with counts (a crafting or banker's list): Price all searches each item you still lack, then
+-- shows the total; then each item takes two clicks, as the game wants a click for each purchase: its price (the
+-- button), then Confirm. After each purchase the next one's price is asked at once. Trade goods only: other items are
+-- named, to buy one by one. shop.all = { list, stage = "pricing" | "ready" | "quoting" | "confirm" | "buying" | "done",
+-- queue = { { name, qty, f } }, i, spent }
+local function missingOf(l, name)
+  local w = l.want and l.want[name]
+  return w and math.max(0, w - haveOf(name)) or 0
+end
+-- what the list's counts cost when they were added (only items that had a price then)
+function A.estimateOf(l)
+  local t = 0
+  for _, name in ipairs(l.items) do
+    local e, w = l.est and l.est[name], l.want and l.want[name]
+    if e and w then t = t + e * w end
+  end
+  return t > 0 and math.floor(t + 0.5) or nil
+end
+allShow = function()
+  local p = pages.shop
+  if not p then return end
+  local st = shop.all
+  if st and st.list ~= currentList() then shop.all, st = nil, nil end
+  if not st or st.stage == "done" then p.all:SetText("Price all") return end
+  local it = st.queue and st.queue[st.i]
+  if st.stage == "pricing" then p.all:SetText("Pricing...")
+  elseif st.stage == "ready" then p.all:SetText(("Buy %d of %d"):format(st.i, #st.queue))
+  elseif st.stage == "quoting" then p.all:SetText("Getting a price...")
+  elseif st.stage == "confirm" then p.all:SetText("Confirm: " .. plainMoney(st.quoted or 0))
+  elseif st.stage == "buying" then p.all:SetText("Buying...") end
+  if it and st.stage ~= "pricing" then
+    local nextIt = st.queue[st.i + 1]
+    local tail = nextIt and (", then " .. nextIt.name) or ""
+    if st.stage == "confirm" then
+      p.sel:SetText(("%d of %d: %d %s for %s: click Confirm%s"):format(st.i, #st.queue, it.qty, it.name, coins(st.quoted or 0), tail))
+    else
+      p.sel:SetText(("%d of %d: %d %s%s"):format(st.i, #st.queue, it.qty, it.name, tail))
+    end
+  end
+end
+local function allQuote()
+  local st = shop.all
+  local it = st and st.queue[st.i]
+  if not it then return end
+  st.stage = "quoting"
+  shop.quote = { qty = it.qty, asked = true, all = true }
+  allShow()
+  AH.StartCommoditiesPurchase(it.f.key.itemID, it.qty)
+end
+-- everything searched: what to buy, and the total
+local function allPriced()
+  local st = shop.all
+  if not (st and st.stage == "pricing") then return end
+  local l, queue, total, est, skipped = st.list, {}, 0, 0, {}
+  for _, name in ipairs(l.items) do
+    local miss = missingOf(l, name)
+    local f = shop.found[name:lower()]
+    if miss > 0 then
+      if f and f.commodity then
+        queue[#queue + 1] = { name = name, qty = miss, f = f }
+        total = total + (f.each or 0) * miss
+        if l.est and l.est[name] then est = est + l.est[name] * miss end
+      elseif f then
+        skipped[#skipped + 1] = name .. " (buy it on its own)"
+      else
+        skipped[#skipped + 1] = name .. " (none on sale)"
+      end
+    end
+  end
+  st.queue, st.i, st.spent = queue, 1, 0
+  if #skipped > 0 then say("Buy all leaves out: " .. table.concat(skipped, ", ")) end
+  if #queue == 0 then
+    st.stage = "done"
+    allShow()
+    pages.shop.sel:SetText("Nothing here to buy all at once")
+    return
+  end
+  st.stage = "ready"
+  allShow()
+  pages.shop.sel:SetText(("%d item%s, about %s at the cheapest%s. Click Buy 1 of %d to start"):format(#queue,
+    #queue == 1 and "" or "s", coins(math.floor(total + 0.5)),
+    est > 0 and (" (estimated when added: " .. coins(math.floor(est + 0.5)) .. ")") or "", #queue))
+  log("AH_BUY_ALL_PRICED", { n = #queue, total = math.floor(total + 0.5) })
+end
+function A.buyAllClick()
+  local st = shop.all
+  if st and st.list ~= currentList() then shop.all, st = nil, nil end
+  if not st or st.stage == "done" then
+    local l = currentList()
+    local names = {}
+    for _, name in ipairs(l.items) do if missingOf(l, name) > 0 then names[#names + 1] = name end end
+    if #names == 0 then
+      pages.shop.sel:SetText(l.want and "You carry everything this list wants" or "Price all needs a list with counts (from a recipe or a crate)")
+      return
+    end
+    shop.pick, shop.quote, shop.auction = nil, nil, nil
+    pages.shop.buy:SetEnabled(false)
+    pages.shop.buy:SetText("Buy")
+    pages.shop.qty:Hide()
+    shop.all = { list = l, stage = "pricing" }
+    allShow()
+    pages.shop.sel:SetText("Pricing " .. #names .. " item" .. (#names == 1 and "" or "s") .. "...")
+    local left = #names
+    for _, name in ipairs(names) do
+      shopFind(name, function()
+        left = left - 1
+        if pages.shop then pages.shop.refresh() end
+        if left == 0 then allPriced() end
+      end)
+    end
+  elseif st.stage == "ready" or st.stage == "quoting" then
+    allQuote()
+  elseif st.stage == "confirm" then
+    local it = st.queue[st.i]
+    st.stage = "buying"
+    shop.quote = nil
+    allShow()
+    AH.ConfirmCommoditiesPurchase(it.f.key.itemID, it.qty)
+    log("AH_BUY", { id = it.f.key.itemID, n = it.qty, all = true })
+  end
+end
+-- a purchase in Buy all ended: on to the next, or try that one again
+local function allBought(ok)
+  local st = shop.all
+  if ok then
+    st.spent = st.spent + (st.quoted or 0)
+    st.i = st.i + 1
+    if st.i > #st.queue then
+      st.stage = "done"
+      say(("bought all %d for %s"):format(#st.queue, coins(st.spent)))
+      allShow()
+      if pages.shop then pages.shop.sel:SetText(("Bought all %d for %s"):format(#st.queue, coins(st.spent))) end
+      return
+    end
+    -- the next one's price at once; if the game wants a click for that too, the button asks for it
+    if not pcall(allQuote) then
+      st.stage = "ready"
+      allShow()
+    end
+  else
+    st.stage = "ready"
+    allShow()
+    if pages.shop then pages.shop.sel:SetText(st.queue[st.i].name .. ": that didn't go through. Click to try again") end
+  end
+end
+A.buyAllState = function() return shop.all end   -- (the smoke test)
 local listPicker
 local function pickList(anchor)
   if not listPicker then
@@ -1492,6 +1872,11 @@ local function pickList(anchor)
   local items = {}
   for i, l in ipairs(lists()) do items[#items + 1] = { l.name .. " |cff999999(" .. #l.items .. ")|r", function() shop.index = i AuDHDDB.ahList = i end } end
   items[#items + 1] = { "New list...", function() StaticPopup_Show("AUDHD_AH_NEWLIST") end }
+  items[#items + 1] = { "Import (Auctionator)...", A.showImport }
+  if ns.gather then
+    local cur = currentList()
+    items[#items + 1] = { "Track gathering: " .. cur.name, function() ns.gather.track(cur.name) end }
+  end
   if #lists() > 1 then
     items[#items + 1] = { "|cffff6060Delete " .. currentList().name .. "|r", function()
       table.remove(lists(), shop.index)
@@ -1545,7 +1930,7 @@ local function shopPage(page)
   p.list = rowList(page, 0, -26, 420, 10, 20, function(r)
     r.left = label(r)
     r.left:SetPoint("LEFT", 4, 0)
-    r.left:SetWidth(240)
+    r.left:SetWidth(290)
     r.left:SetWordWrap(false)
     r.right = label(r)
     r.right:SetPoint("RIGHT", -24, 0)
@@ -1560,6 +1945,7 @@ local function shopPage(page)
       for i, n in ipairs(l.items) do if n == name then table.remove(l.items, i) break end end
       if l.want then l.want[name] = nil end
       if l.from then l.from[name] = nil end
+      if l.est then l.est[name] = nil end
       if shop.pick == name then shopPick(nil) end
       p.refresh()
     end)
@@ -1570,7 +1956,10 @@ local function shopPage(page)
     if w then
       -- a banker's bundle: how many wanted and how many in your bags; green once you have them
       local have = haveOf(name)
-      r.left:SetText(("%s%s|r |cffffd200%d|r |cff999999(have %d)|r"):format(have >= w and "|cff40ff40" or "", name, w, have))
+      local e = currentList().est
+      e = e and e[name]
+      r.left:SetText(("%s%s|r |cffffd200%d|r |cff999999(have %d)%s|r"):format(have >= w and "|cff40ff40" or "", name, w, have,
+        e and ("  est. " .. coins(math.floor(e * w + 0.5))) or ""))
     else
       r.left:SetText(name)
     end
@@ -1608,11 +1997,21 @@ local function shopPage(page)
   p.buy:SetPoint("TOPRIGHT", page, "TOPRIGHT", -4, -282)
   p.buy:SetEnabled(false)
   p.buy:SetScript("OnClick", function() shopBuy() end)
+  p.all = button(page, "Price all", 150)
+  p.all:SetPoint("RIGHT", p.buy, "LEFT", -8, 0)
+  p.all:SetScript("OnClick", function() A.buyAllClick() end)
   function p.refresh()
     local l = currentList()
     ns.dropText(p.pick, l.name)
     p.list.show(l.items)
-    if not shop.pick then p.sel:SetText(#l.items == 0 and "Type an item's name below and press Add" or "Pick an item from the list") end
+    p.all:SetShown(l.want ~= nil)
+    if shop.all and shop.all.list ~= l then shop.all = nil end
+    if not shop.pick and not shop.all then
+      local est = A.estimateOf(l)
+      p.sel:SetText(#l.items == 0 and "Type an item's name below and press Add"
+        or est and ("Estimated when added: " .. coins(est) .. ". Pick an item, or Price all") or "Pick an item from the list")
+    end
+    allShow()
   end
 end
 
@@ -1673,7 +2072,9 @@ local function makeWindow()
   win.scanB = button(win, "Full scan", 80, 20)
   win.scanB:SetPoint("TOPRIGHT", -20, -34)
   win.scanB:SetScript("OnClick", function()
-    if not A.fullScan() then say(scan and "a scan is running" or ("the auction house allows a full scan once every 15 minutes: " .. math.ceil(A.nextScan() / 60) .. " min to go")) end
+    local early = A.nextScan() > 0
+    if not A.fullScan(true) then say("open the auction house first") return end
+    if early then say("full scan started early: the auction house may refuse it within 15 minutes of the last one") end
   end)
   win.pages, win.tabs, win.Tabs = {}, {}, {}
   local prev
@@ -1702,7 +2103,7 @@ end
 function A.refresh()
   if not (win and win:IsShown()) then return end
   win.status:SetText(A.scanText())
-  win.scanB:SetEnabled(not scan and A.nextScan() == 0)
+  win.scanB:SetEnabled(true)
   local p = pages[shownTab]
   if p and p.refresh then try("fill " .. tostring(shownTab), p.refresh) end
 end
@@ -1748,7 +2149,8 @@ for _, e in ipairs({ "PLAYER_LOGIN", "AUCTION_HOUSE_SHOW", "AUCTION_HOUSE_CLOSED
                      "AUCTION_HOUSE_AUCTION_CREATED", "AUCTION_HOUSE_POST_WARNING", "AUCTION_HOUSE_POST_ERROR", "AUCTION_CANCELED",
                      "COMMODITY_PRICE_UPDATED", "COMMODITY_PRICE_UNAVAILABLE", "COMMODITY_PURCHASE_SUCCEEDED",
                      "COMMODITY_PURCHASE_FAILED", "AUCTION_HOUSE_PURCHASE_COMPLETED", "BAG_UPDATE_DELAYED",
-                     "AUCTION_HOUSE_SHOW_ERROR", "UI_ERROR_MESSAGE", "MODIFIER_STATE_CHANGED", "MAIL_SHOW" }) do
+                     "AUCTION_HOUSE_SHOW_ERROR", "UI_ERROR_MESSAGE", "MODIFIER_STATE_CHANGED", "MAIL_SHOW",
+                     "BANKFRAME_OPENED", "PLAYERBANKSLOTS_CHANGED" }) do
   pcall(frame.RegisterEvent, frame, e)
 end
 local handlers = {}
@@ -1844,7 +2246,7 @@ handlers.MODIFIER_STATE_CHANGED = function(key)
     if enter then pcall(enter, mailHover) end
     return
   end
-  if GameTooltip.RefreshData then pcall(GameTooltip.RefreshData, GameTooltip) end
+  if pricedTip and GameTooltip.RefreshData then pcall(GameTooltip.RefreshData, GameTooltip) end
 end
 handlers.UI_ERROR_MESSAGE = function(_, text)
   if sell.last and type(text) == "string" and not (issecretvalue and issecretvalue(text)) then sell.uiError = text end
@@ -1859,14 +2261,29 @@ handlers.COMMODITY_PRICE_UPDATED = function(each, total)
   local q = shop.quote
   if not (q and q.asked and pages.shop) then return end
   q.asked = false
+  if q.all and shop.all and shop.all.stage == "quoting" then
+    shop.all.stage, shop.all.quoted = "confirm", total or 0
+    allShow()
+    return
+  end
   pages.shop.buy:SetText("Confirm: " .. plainMoney(total or 0))
   pages.shop.sel:SetText(("%d for %s in all (%s each): click Confirm to buy"):format(q.qty, coins(total or 0), coins(each or 0)))
 end
 handlers.COMMODITY_PRICE_UNAVAILABLE = function()
   shop.quote = nil
+  if shop.all and (shop.all.stage == "quoting" or shop.all.stage == "confirm") then
+    shop.all.stage = "ready"
+    allShow()
+    if pages.shop then pages.shop.sel:SetText("That price is gone: click to ask again") end
+    return
+  end
   if pages.shop then pages.shop.buy:SetText("Buy") pages.shop.sel:SetText("That price is gone: search again") end
 end
 local function bought(ok)
+  if shop.all and shop.all.stage == "buying" then
+    allBought(ok)
+    return
+  end
   if pages.shop then pages.shop.buy:SetText("Buy") end
   if ok then say("bought") else say("the purchase didn't go through") end
   shop.quote, shop.auction = nil, nil
@@ -1875,6 +2292,8 @@ end
 handlers.COMMODITY_PURCHASE_SUCCEEDED = function() bought(true) end
 handlers.COMMODITY_PURCHASE_FAILED = function() bought(false) end
 handlers.AUCTION_HOUSE_PURCHASE_COMPLETED = function() bought(true) end
+handlers.BANKFRAME_OPENED = function() A.changed() end
+handlers.PLAYERBANKSLOTS_CHANGED = function() A.changed() end
 handlers.BAG_UPDATE_DELAYED = function()
   A.changed()
   if win and win:IsShown() and shownTab == "sell" and pages.sell then try("fill sell", pages.sell.refresh) end

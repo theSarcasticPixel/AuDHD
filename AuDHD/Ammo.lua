@@ -1,7 +1,8 @@
 -- Ammo (Hunters): how many arrows / bullets you carry, a warning when it runs low (with the nearest vendor that sells
 -- your kind), "/audhd ammo" to point the arrow at that vendor, and buying back up at a vendor (setting auto.ammo, on by
 -- default: as much as your quiver or ammo pouch holds, else AuDHDDB.ammoTarget, else 1000; never spending what
--- your next class skills cost). Our own frames and the merchant API only: nothing protected.
+-- your next class skills cost, unless you say so in the popup that tells you). Our own frames and the merchant API
+-- only: nothing protected.
 local _, ns = ...
 local M = {}
 ns.ammo = M
@@ -164,8 +165,61 @@ function M.goVendor(off)
   return ("arrow points at %s (%d yd); /audhd ammo off to go back to the route"):format(v.n, math.floor(d or 0))
 end
 
+local function coins(c) return ns.services and ns.services.coins and ns.services.coins(c) or (c .. "c") end
+local function buyN(i, qty)
+  local bought = 0
+  while bought < qty do
+    local n = math.min(qty - bought, 200)
+    BuyMerchantItem(i, n)
+    bought = bought + n
+  end
+  return bought
+end
+-- money held back left you short: a popup says how many and why, and Buy anyway gets the rest (as much as you can pay)
+local held
+StaticPopupDialogs.AUDHD_AMMO_ANYWAY = {
+  text = "%s", button1 = "Buy anyway", button2 = "Not now",
+  OnAccept = function() M.buyAnyway() end,
+  timeout = 0, whileDead = 1, hideOnEscape = 1,
+}
+function M.buyAnyway()
+  local h = held
+  held = nil
+  if not (h and MerchantFrame and MerchantFrame:IsShown() and GetMerchantItemLink(h.i) == h.link) then
+    print("|cff66ccffAuDHD|r: the vendor's window closed, so no ammo was bought")
+    return 0
+  end
+  local qty = h.perItem > 0 and math.min(h.left, math.floor(GetMoney() / h.perItem)) or h.left
+  if qty <= 0 then return 0 end
+  local bought = buyN(h.i, qty)
+  log("AMMO_BOUGHT", { kind = h.kind, item = h.link, count = bought, copper = math.floor(bought * h.perItem), anyway = true })
+  return bought
+end
+M.held = function() return held end   -- (the smoke test)
+local function holdBack(h, bought)
+  local why = {}
+  if h.reserve > 0 then
+    why[#why + 1] = coins(h.reserve) .. (h.forLevel and h.forLevel > UnitLevel("player")
+      and (" for your level " .. h.forLevel .. " class skills") or " for the class skills you haven't trained yet")
+  end
+  if h.weapon then why[#why + 1] = coins(h.weapon) .. " for the weapon your route buys next" end
+  local name = h.kind == "arrow" and "arrows" or "bullets"
+  local head = bought > 0 and ("Bought %d of the %d %s you need."):format(bought, bought + h.left, name)
+    or ("Didn't buy %s."):format(name)
+  local reason = #why > 0 and (" AuDHD keeps " .. table.concat(why, " and ") .. ".") or ""
+  local anyway = math.min(h.left, h.perItem > 0 and math.floor(GetMoney() / h.perItem) or h.left)
+  if anyway <= 0 then
+    print(("|cff66ccffAuDHD|r: %s%s You can't pay for more."):format(head, reason))
+    return
+  end
+  held = h
+  StaticPopup_Show("AUDHD_AMMO_ANYWAY", ("%s%s\n\nBuy %d more anyway, for %s?"):format(head, reason, anyway,
+    coins(math.ceil(anyway * h.perItem))))
+end
+
 -- at a vendor: buy the best ammo of your kind you can use, up to the target
 local function autoBuy()
+  held = nil
   local on = AuDHDDB.auto and AuDHDDB.auto.ammo
   if on == false or IsShiftKeyDown() then return end
   local kind = M.kind()
@@ -193,10 +247,10 @@ local function autoBuy()
   stack = (stack and stack > 0) and stack or 1
   local need = target - have
   local perItem = (price or 0) / stack
-  local budget = GetMoney()
+  local budget, weapon = GetMoney(), nil
   for k = 0, 3 do
     local s = ns.core.peek(k)
-    if s and s.k == "buyweapon" and s.pc then budget = budget - s.pc; break end
+    if s and s.k == "buyweapon" and s.pc then budget, weapon = budget - s.pc, s.pc; break end
   end
   local reserve, forLevel = M.trainReserve()
   budget = budget - reserve
@@ -207,14 +261,16 @@ local function autoBuy()
   if have < floor and budget < floorCost and floorCost <= GetMoney() / 4 then budget = floorCost
   elseif budget < 0 and have < 200 then budget = 200 * perItem end
   local affordable = perItem > 0 and math.floor(math.max(budget, 0) / perItem) or need
-  local qty = math.min(need, affordable)
-  if qty <= 0 then log("AMMO_CANT_AFFORD", { kind = kind, need = need, reserve = reserve, forLevel = forLevel }) return end
-  local bought = 0
-  while bought < qty do
-    local n = math.min(qty - bought, 200)
-    BuyMerchantItem(best, n)
-    bought = bought + n
+  local qty = math.max(0, math.min(need, affordable))
+  local h = { i = best, link = GetMerchantItemLink(best), kind = kind, perItem = perItem, left = need - qty,
+              reserve = reserve, forLevel = forLevel, weapon = weapon }
+  if qty <= 0 then
+    log("AMMO_CANT_AFFORD", { kind = kind, need = need, reserve = reserve, forLevel = forLevel })
+    holdBack(h, 0)
+    return
   end
+  local bought = buyN(best, qty)
+  if h.left > 0 then holdBack(h, bought) end
   log("AMMO_BOUGHT", { kind = kind, item = GetMerchantItemLink(best), count = bought, copper = math.floor(bought * perItem),
     target = target, reserve = reserve, forLevel = forLevel })
   if ns.core.override and ns.core.override.t and ns.core.override.t:find("^Buy ammo") then ns.core.override = nil end
@@ -227,12 +283,15 @@ frame:SetScript("OnEvent", function(_, event)
   elseif event == "MERCHANT_SHOW" then
     local ok, err = pcall(autoBuy)
     if not ok then log("AMMO_ERROR", { err = tostring(err) }) end
+  elseif event == "MERCHANT_CLOSED" then
+    held = nil
+    if StaticPopup_Hide then StaticPopup_Hide("AUDHD_AMMO_ANYWAY") end
   else
     pcall(M.check)
     if ns.ui then ns.ui.refresh() end
   end
 end)
 function M.enable()
-  for _, e in ipairs({ "MERCHANT_SHOW", "BAG_UPDATE_DELAYED", "PLAYER_EQUIPMENT_CHANGED", "TRAINER_SHOW", "TRAINER_UPDATE" }) do pcall(frame.RegisterEvent, frame, e) end
+  for _, e in ipairs({ "MERCHANT_SHOW", "MERCHANT_CLOSED", "BAG_UPDATE_DELAYED", "PLAYER_EQUIPMENT_CHANGED", "TRAINER_SHOW", "TRAINER_UPDATE" }) do pcall(frame.RegisterEvent, frame, e) end
   pcall(M.check)
 end
